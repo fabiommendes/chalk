@@ -1,0 +1,24 @@
+[project]
+name = "chalk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Fábio Macêdo Mendes", email = "fabiomacedomendes@gmail.com" },
+]
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.13.4",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+    "typer",
+    "types-openpyxl>=3.1.5.20260508",
+    "types-pyyaml>=6.0.12.20260510",
+]
+
+[project.scripts]
+chalk = "chalk.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
