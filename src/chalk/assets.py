@@ -1,5 +1,7 @@
 from locale import getdefaultlocale
 
+__all__ = ["create_chalk_toml"]
+
 CHALK_TOML = """[chalk]
 classroom = "<classroom-name>"
 teacher = "<teacher-name>"
@@ -7,7 +9,7 @@ lang = "<locale>"
 """
 
 
-def chalk_toml(
+def create_chalk_toml(
     teacher: str = "<teacher-name>",
     classroom: str = "<classroom-name>",
     locale: str | None = None,

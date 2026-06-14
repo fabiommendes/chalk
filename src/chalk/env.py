@@ -45,7 +45,7 @@ def get_interactivity(value: bool | None) -> bool:
     return (
         os.isatty(0)
         and os.isatty(1)
-        and os.environ.get("CHALK_INTERACTIVE", "0") != "0"
+        and os.environ.get("CHALK_INTERACTIVE", "1") == "1"
     )
 
 
@@ -56,6 +56,7 @@ def ask_optional_string(
     *,
     default: str,
     interactive: bool | None = None,
+    style: str | None = "bold",
 ) -> str: ...
 
 
@@ -64,8 +65,9 @@ def ask_optional_string(
     prompt: str,
     value: str | None = None,
     *,
-    default: None = None,
+    default: str | None = None,
     interactive: bool | None = None,
+    style: str | None = "bold",
 ) -> str | None: ...
 
 
@@ -75,10 +77,13 @@ def ask_optional_string(
     *,
     default: str | None = None,
     interactive: bool | None = None,
+    style: str | None = "bold",
 ) -> str | None:
     """
     Ask the user for a value using a prompt, with an optional default value.
     """
+    if style is not None:
+        prompt = f"[{style}]{prompt}[/]"
     if value is not None:
         return value
     elif get_interactivity(interactive) and default is not None:

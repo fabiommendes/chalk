@@ -1,7 +1,13 @@
+import os
+import tomllib
 from pathlib import Path
 
-from .exceptions import Error
-from .models import SPREADSHEET_EXTENSIONS, STRUCTURED_DATA_EXTENSIONS
+from .core.classroom import (
+    SPREADSHEET_EXTENSIONS,
+    STRUCTURED_DATA_EXTENSIONS,
+    Classroom,
+)
+from .core.error import SystemError
 
 
 def find_project_root(path: Path | None = None) -> Path:
@@ -23,7 +29,7 @@ def find_project_root(path: Path | None = None) -> Path:
             break
         path = parent
 
-    raise Error.CONFIG_NOT_FOUND()
+    raise SystemError.CONFIG_NOT_FOUND()
 
 
 def is_project_root(path: Path) -> bool:
@@ -55,7 +61,26 @@ def get_conf_file(path: Path | None = None) -> Path:
     if conf_file.exists():
         return conf_file
 
-    raise Error.CONFIG_NOT_FOUND()
+    raise SystemError.CONFIG_NOT_FOUND()
+
+
+def get_classroom(path: Path | None = None) -> Classroom:
+    """
+    Load the chalk.toml configuration file and return it as a Classroom object.
+
+    Raises RuntimeError if no configuration file is found.
+    """
+    from .core.grade import set_precision
+
+    with get_conf_file(path).open("rb") as fd:
+        data = tomllib.load(fd)["chalk"]
+        data["name"] = data.pop("classroom")
+
+    model = Classroom.model_validate(data)
+
+    # Set global precision
+    set_precision(model.decimal_precision)
+    return model
 
 
 def get_roster_file(path: Path | None = None) -> Path:
@@ -74,6 +99,18 @@ def get_roster_file(path: Path | None = None) -> Path:
     if len(roster_files) == 1:
         return roster_files[0]
     elif len(roster_files) > 1:
-        raise Error.MULTIPLE_ROSTERS_FOUND()
+        raise SystemError.MULTIPLE_ROSTERS_FOUND()
 
-    raise Error.ROSTER_NOT_FOUND()
+    raise SystemError.ROSTER_NOT_FOUND()
+
+
+def open_editor(path: Path) -> None:
+    """
+    Open the specified file in the user's default editor.
+
+    This function replaces the current process with the editor, so it does not return.
+    """
+
+    editor = os.getenv("EDITOR", "vi").strip("'\"")
+    print([editor, [editor, str(path)]])
+    os.execvp(editor, [editor, str(path)])
