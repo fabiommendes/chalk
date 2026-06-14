@@ -1,0 +1,35 @@
+site_name: Chalk
+site_description: Classroom management CLI documentation
+site_url: https://example.com/chalk
+repo_name: chalk
+repo_url: https://example.com/chalk
+
+theme:
+  name: material
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - src
+
+nav:
+  - Home: index.md
+  - User Manual:
+      - Overview: user-manual/index.md
+      - Command Tree: user-manual/command-tree.md
+      - Man Pages:
+          - chalk: user-manual/man/chalk.md
+          - chalk-init: user-manual/man/chalk-init.md
+          - chalk-roster: user-manual/man/chalk-roster.md
+          - chalk-assignment: user-manual/man/chalk-assignment.md
+          - chalk-question: user-manual/man/chalk-question.md
+          - chalk-response: user-manual/man/chalk-response.md
+          - chalk-grade: user-manual/man/chalk-grade.md
+          - chalk-report: user-manual/man/chalk-report.md
+          - chalk-script: user-manual/man/chalk-script.md
+  - Developer Docs:
+      - Overview: developer/index.md
+      - API Reference: developer/api.md

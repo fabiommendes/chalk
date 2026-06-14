@@ -8,12 +8,22 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "cytoolz>=1.1.0",
+    "natsort>=8.4.0",
+    "optionz>=0.1.2",
+    "pandas>=3.0.3",
+    "pandas-stubs>=3.0.0.260204",
+    "pandera>=0.31.1",
     "pydantic>=2.13.4",
+    "pygments>=2.20.0",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
+    "toolz>=1.1.0",
+    "toolz-stubs>=0.4.1",
     "typer",
     "types-openpyxl>=3.1.5.20260508",
     "types-pyyaml>=6.0.12.20260510",
+    "unidecode>=1.4.0",
 ]
 
 [project.scripts]
@@ -22,3 +32,19 @@ chalk = "chalk.__main__:main"
 [build-system]
 requires = ["uv_build>=0.11.3,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.mypy]
+strict = true
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.155.2",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.6.0",
+    "mkdocstrings[python]>=0.30.0",
+    "mypy>=2.1.0",
+    "pandera[mypy]>=0.31.1",
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "types-pygments>=2.20.0.20260518",
+]

@@ -29,6 +29,9 @@ or install it globally using pip:
 pip install chalk
 ```
 
+I prefer the alias method, but to each their own. I you use Windows, I recommend
+replacing your operating system with something decent 😘.
+
 Usage
 -----
 
@@ -81,19 +84,20 @@ File formats
 
 ### Roster
 
-The roster can be stored in a table form (e.g., CSV, XLSX) or a list form (e.g., JSON, YAML).
-The translation between the two forms is straightforward: table columns simply correspond
-to fields in the student model, and empty cells are translated to null values.
+The roster can be stored in a table form (e.g., CSV, XLSX) or a list form (e.g.,
+JSON, YAML). Columns simply correspond to fields in the student model, and empty
+cells are translated to null values.
 
 **Examples**
 
-A almost minimal example of a roster in CSV and YAML formats:
+A almost minimal example of a roster in CSV 
 
 ```csv
 id,name,email
 1234,John Doe,john.doe@example.com
 5678,Alice Smith,
 ```
+and YAML
 
 ```yaml
 - id: "1234"
@@ -135,3 +139,44 @@ data:
       answer: "Brasilia"
       grade: 100
 ```
+
+The table representation is a little more complex since it must handle nested data.
+The table can be stored in a single file like so:
+
+```csv
+id,q1.answer,q1.grade,q2.answer,q2.grade,q2.feedback
+1234,42,100,Rio de Janeiro,0,"The capital moved to Brasilia in 1960."
+5678,0,50,Brasilia,100,
+```
+
+Or it can be split into multiple files:
+
+```csv
+# midterm.csv
+id,q1,q2
+1234,42,Rio de Janeiro
+5678,0,Brasilia
+```
+
+```csv
+# midterm.grades.csv
+id,q1,q2
+1234,100,0
+5678,50,100
+```
+
+```csv
+# midterm.feedback.csv
+id,q1,q2
+1234,,"The capital moved to Brasilia in 1960."
+5678,,
+```
+
+The csv might add an optional row with an empty id to specify additional
+information:
+
+```csv
+id,q1.answer,q2.answer,q1.grade,q2.grade,q1.feedback,q2.feedback
+,42,Rio de Janeiro,100,100,,
+```
+
