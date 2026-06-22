@@ -5,11 +5,12 @@ import re
 from decimal import Decimal
 from typing import Iterable, Literal, TypeGuard, cast, get_args, overload
 
+import opt
+
+from ..types import Numeric, to_decimal
 from ..util.parsing import Parsed, read_number, read_parens
 
 REASON = re.compile(r"([a-z_]+)\s+")
-
-type Numeric = int | float | Decimal
 
 
 AdjustmentReason = Literal[
@@ -110,7 +111,9 @@ class Adjustment:
         )
 
     @property
-    def method(self) -> Literal["relative", "absolute", "overriden", "comment"]:
+    def method(
+        self,
+    ) -> Literal["relative", "absolute", "overriden", "comment", "affine"]:
         """
         The method used for this adjustment.
 
@@ -123,8 +126,10 @@ class Adjustment:
             return "comment"
         elif self.relative != 1:
             return "relative"
-        else:
+        elif self.relative == 1:
             return "absolute"
+        else:
+            return "affine"
 
     @overload
     def __init__(self, value: Numeric | str, /) -> None: ...
@@ -191,7 +196,6 @@ class Adjustment:
                 and self.absolute == other.absolute
                 and self.override == other.override
                 and self.reason == other.reason
-                and self.description == other.description
             )
         return NotImplemented
 
@@ -208,6 +212,51 @@ class Adjustment:
         elif self.absolute != 0:
             args.append(f"absolute={self.absolute}")
         return f"Adjustment({', '.join(args)})"
+
+    def __rshift__(self, other: Adjustment) -> Adjustment:
+        if not isinstance(other, Adjustment):
+            return NotImplemented
+
+        match (other.method, self.method):
+            case ("comment", _) | (_, "override"):
+                return other
+            case (_, "comment"):
+                return self
+            case ("relative", "relative"):
+                return Adjustment(
+                    relative=self.relative * other.relative,
+                    reason=other.reason or self.reason,
+                    description=other.description or self.description,
+                )
+            case ("absolute", "absolute"):
+                return Adjustment(
+                    absolute=self.absolute + other.absolute,
+                    reason=other.reason or self.reason,
+                    description=other.description or self.description,
+                )
+            case ("override", _):
+                return Adjustment(
+                    override=self.apply(self.override),
+                    reason=other.reason or self.reason,
+                    description=other.description or self.description,
+                )
+            case _:
+                a = self.relative
+                b = self.absolute
+                aa = other.relative
+                bb = other.absolute
+
+                new = Adjustment(
+                    absolute=0,
+                    reason=opt.coalesce(self.reason, other.reason),
+                    description=opt.coalesce(self.description, other.description),
+                )
+                new._relative = a * aa
+                new._absolute = b * aa + bb
+                return new
+
+    def __hash__(self) -> int:
+        return hash((self.relative, self.absolute, self.override, self.reason))
 
     def apply(self, grade: Numeric) -> Decimal:
         """
@@ -278,17 +327,6 @@ def apply_chain(grade: Numeric, adjustments: Iterable[Adjustment]) -> Decimal:
     for adj in adjustments:
         grade = adj.apply(grade)
     return grade
-
-
-def to_decimal(value: Numeric | str) -> Decimal:
-    """
-    Convert the given numeric value to a Decimal.
-    """
-    if type(value) is Decimal:
-        return value
-    elif isinstance(value, int | float):
-        return Decimal(str(value))
-    return Decimal(value)
 
 
 def parse(src: str) -> tuple[Adjustment, Decimal]:

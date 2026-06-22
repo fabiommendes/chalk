@@ -1,43 +1,57 @@
-"""
-Basic types and protocols used throughout the Chalk codebase.
-"""
+from decimal import Decimal
+from typing import Annotated, Any, Literal
 
-from __future__ import annotations
+#
+# String Id types
+#
+type StudentId = Annotated[str, "A unique identifier for a student."]
+type QuestionId = Annotated[str, "A unique identifier for a question."]
+type AssignmentId = Annotated[str, "A unique identifier for an assignment."]
 
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+#
+# Enumerations
+#
+QuestionType = Literal[
+    "association",
+    "fill-in",
+    "multiple-choice",
+    "multiple-selection",
+    "text",
+]
 
-if TYPE_CHECKING:
-    pass
-
-_T_contra = TypeVar("_T_contra", contravariant=True)
-
-type JSON = dict[str, Any] | list[Any] | str | int | float | bool | None
-
-
-class SupportsDunderLT(Protocol[_T_contra]):
-    def __lt__(self, other: _T_contra, /) -> bool: ...
-
-
-class SupportsDunderGT(Protocol[_T_contra]):
-    def __gt__(self, other: _T_contra, /) -> bool: ...
-
-
-type SupportsRichComparison[_T_contra] = (
-    SupportsDunderLT[_T_contra] | SupportsDunderGT[_T_contra]
+#
+# Other basic types
+#
+Answer = (
+    # numeric
+    int
+    | float
+    | complex
+    | Decimal
+    # textual, multiple-choice
+    | str
+    # multiple-selection, fill-in
+    | list[str]
+    # association
+    | dict[str, str]
 )
 
+type Numeric = int | float | Decimal
 
-class ReadOnly[T](Protocol):
+
+# TODO: Define a structured type for submission data.
+type SubmissionData = Any
+
+
+#
+# Simple conversion functions
+#
+def to_decimal(value: Numeric | str) -> Decimal:
     """
-    A protocol for read-only descriptors.
+    Convert the given numeric value to a Decimal.
     """
-
-    def __get__(self, instance: object, owner: type) -> T: ...
-
-
-class Displayable(Protocol):
-    def display(self) -> None:
-        """
-        Display the object in the console in a human-readable format.
-        """
-        ...
+    if type(value) is Decimal:
+        return value
+    elif isinstance(value, int | float):
+        return Decimal(str(value))
+    return Decimal(value)

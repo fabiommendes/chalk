@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 from typing import NamedTuple
 
-from ..core import Answer, Grade
-from ..types import JSON
+from ..core import Grade
+from ..protocols import JSON
+from ..types import Answer
 
 __all__ = [
     "GradeAndFeedback",

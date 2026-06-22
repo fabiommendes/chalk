@@ -1,22 +1,46 @@
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import rich
+import rich as _rich
 from rich.tree import Tree
 
 MAX_DEPTH = 2**32
 
 
-def _show_file(path: Path) -> bool:
+#
+# Generic print/display functions.
+#
+def rich_print(value: Any, *, rich: bool = True, style: str | None = None) -> None:
     """
-    Show the contents of a file in the console.
+    A wrapper around rich.print that can be used to print rich content vs
+    plain text.
     """
-    return not path.name.startswith(".")  # FIXME: make it work on Windows too
+    if rich:
+        if style is not None:
+            _rich.print(f"[{style}]{value}[/{style}]")
+        else:
+            _rich.print(value)
+    else:
+        print(value)
 
 
+def display_field(name: str, value: Any, rich: bool = True) -> None:
+    """
+    Display a field of a question in a consistent format.
+    """
+    if value is not None and value is not False:
+        rich_print(f"  - [italic]{name}:[/] [yellow]{value}[/]", rich=rich)
+    if value is True:
+        rich_print(f"  - [italic]{name}[/]", rich=rich)
+
+
+#
+# Specialized printers
+#
 def print_file_tree(
     path: Path,
-    pred: Callable[[Path], bool] = _show_file,
+    pred: Callable[[Path], bool] = lambda p: _show_file(p),
     depth: int = MAX_DEPTH,
     root_label: str = "/",
     hide_root: bool = False,
@@ -33,6 +57,13 @@ def print_file_tree(
             depth=depth,
         )
     )
+
+
+def _show_file(path: Path) -> bool:
+    """
+    Show the contents of a file in the console.
+    """
+    return not path.name.startswith(".")  # FIXME: make it work on Windows too
 
 
 def _generate_branches(
@@ -64,7 +95,3 @@ def _generate_branches(
         else:
             root.add(f"[green]{child.name}")
     return root
-
-
-if __name__ == "__main__":
-    print_file_tree(Path.cwd())

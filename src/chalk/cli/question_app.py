@@ -1,16 +1,14 @@
 import sys
 from pathlib import Path
-from typing import Annotated, Counter
+from typing import Annotated
 
+import errorz as rz
 import opt
 import rich
 import typer
-from rich.padding import Padding
 
-from ..core import Assignment, SystemError, iter_assignments
-from ..data import dump_structured_data, validate_structured_format
-from ..table import Table
-from ..util.string import pluralize, truncate_lines
+from ..core import Assignment, SystemError
+from ..table import Table, validate_table_format
 from .util import read_assignment_and_question, safe
 
 app = typer.Typer(help="Manage questions in assignments.", no_args_is_help=True)
@@ -21,7 +19,7 @@ app = typer.Typer(help="Manage questions in assignments.", no_args_is_help=True)
 # ==============================================================================
 @app.command(name="list")
 @safe
-def list_assignments(
+def list_questions(
     assignment_id: Annotated[
         str | None,
         typer.Argument(
@@ -39,42 +37,64 @@ def list_assignments(
             metavar="COLUMN",
         ),
     ] = "id",
+    output_format: Annotated[
+        str | None,
+        typer.Option(
+            ...,
+            "-f",
+            "--format",
+            metavar="FORMAT",
+            help="Specify the output format (e.g. 'table', 'json', etc.)",
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            ...,
+            "-o",
+            "--output",
+            metavar="PATH",
+            help="Specify a file to save the output to",
+        ),
+    ] = None,
 ) -> None:
     """
-    Show the current list of assignments.
+    Show the current list of questions in the specified assignment.
     """
     assignment = Assignment.prompt(assignment_id)
 
-    if sort is not None and sort not in {"id", "name", "start", "end"}:
+    if sort is not None and sort not in {"id", "name", "type", "grade"}:
         rich.print(f"[b red]Invalid sort column: {sort}[/]", file=sys.stderr)
         raise typer.Exit(1)
 
     rows = []
     ids: list[str] = []
-    for id, loader in iter_assignments():
-        try:
-            assignment = loader()
-        except Exception as e:
-            rich.print(
-                f"[b red]Error loading assignment {id}:[/]\n  [red]{e}[/]",
-                file=sys.stderr,
-            )
-            continue
-
+    for id, question in (questions := assignment.get_questions()).items():
         cells = {
-            "name": assignment.name,
-            "start": assignment.start,
-            "end": assignment.end,
+            "name": question.name,
+            "type": question.type,
+            "grade": question.grade,
         }
 
         ids.append(id)
         rows.append(cells)
+    total = (
+        sum(
+            question.grade
+            for question in questions.values()
+            if question.grade is not None
+        )
+        or None
+    )
 
     table = Table(rows, index=ids)
-    table = table.select_columns(["name", "start", "end"])
-    table.render(
+    table = table.select_columns(["name", "type", "grade"])
+    table.dump(
+        output_path,
         sort=sort,
         styles={"id": "bold yellow"},
+        last_row={"grade": total, "id": "total"},
+        format=opt.map(validate_table_format, output_format),
     )
 
 
@@ -91,103 +111,30 @@ def show(
             help="Assignment identifier (e.g. 'hw1', 'exam1', etc.)",
         ),
     ] = None,
+    question_id: Annotated[
+        str | None,
+        typer.Argument(
+            ...,
+            metavar="QUESTION",
+            help="Question identifier (e.g. 'q1', 'q2', etc.)",
+        ),
+    ] = None,
     grades: Annotated[
         bool,
         typer.Option(
             ...,
             "-g",
             "--grades",
-            help="Show all grades for the assignment.",
-        ),
-    ] = False,
-    missing: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            "-m",
-            "--missing",
-            help="Show which students have not submitted the assignment.",
+            help="Show all grades and grading details for this question.",
         ),
     ] = False,
 ) -> None:
     """
     Show details of an assignment.
     """
-    assignment = Assignment.prompt(assignment_id)
+    _, question = read_assignment_and_question(assignment_id, question_id)
 
-    if not missing and not grades:
-        assignment.display()
-    elif grades:
-        table = assignment.get_grades(total=True)
-        table.render(sort="id")
-    elif missing:
-        # TODO: Implement missing submission report
-        raise NotImplementedError("Missing submissions report is not yet implemented")
-
-
-# ==============================================================================
-# chalk question choices ASSIGNMENT QUESTION
-# ==============================================================================
-@app.command()
-@safe
-def choices(
-    assignment_id: Annotated[
-        str | None,
-        typer.Argument(
-            metavar="ASSIGNMENT",
-        ),
-    ] = None,
-    question_id: Annotated[
-        str | None,
-        typer.Argument(
-            metavar="QUESTION",
-        ),
-    ] = None,
-    format: Annotated[
-        str | None,
-        typer.Option(
-            ...,
-            "-f",
-            "--format",
-            help="The output format (table, csv, json)",
-        ),
-    ] = None,
-    output: Annotated[
-        Path | None,
-        typer.Option(
-            "-o",
-            "--output",
-            help="Output file path",
-        ),
-    ] = None,
-) -> None:
-    """
-    List all choices for the given question.
-    """
-
-    assignment, question = read_assignment_and_question(assignment_id, question_id)
-    responses = assignment.get_responses_for_question(question.id)
-    choices = Counter([r.answer for r in responses.values() if r.answer is not None])
-    frequencies = [
-        {"choice": choice, "count": count} for choice, count in choices.most_common()
-    ]
-
-    if format or output:
-        dump_structured_data(
-            frequencies,
-            output,
-            format=opt.map(validate_structured_format, format),
-        )
-    else:
-        for i, item in enumerate(frequencies):
-            n = item["count"]
-            source = truncate_lines(item["choice"], 8)
-            rich.print(f"[b white]Choice {i + 1}:[/]")
-            rich.print(Padding(source, (0, 0, 0, 2)))
-            rich.print(f"  [dim]{n} {pluralize(n, 'occurrence')}[/]\n")
-
-        msg = f"[b]Found {len(responses)} responses with {len(frequencies)} unique choices[/]"
-        rich.print(msg)
+    question.display()
 
 
 # ==============================================================================
@@ -242,8 +189,14 @@ def merge(
 @app.command()
 @safe
 def convert(
-    assignment_id: Annotated[str | None, typer.Argument(metavar="ASSIGNMENT")] = None,
-    question_id: Annotated[str | None, typer.Argument(metavar="QUESTION")] = None,
+    assignment_id: Annotated[
+        str | None,
+        typer.Argument(metavar="ASSIGNMENT"),
+    ] = None,
+    question_id: Annotated[
+        str | None,
+        typer.Argument(metavar="QUESTION"),
+    ] = None,
     format: Annotated[
         str | None,
         typer.Option(
@@ -271,3 +224,75 @@ def convert(
 
         responses = assignment.get_responses_for_question(question.id)
         rich.print(responses)
+
+
+# ==============================================================================
+# chalk question issues ASSIGNMENT QUESTION
+# ==============================================================================
+@app.command()
+@safe
+def issues(
+    assignment_id: Annotated[
+        str | None,
+        typer.Argument(metavar="ASSIGNMENT"),
+    ] = None,
+    question_id: Annotated[
+        str | None,
+        typer.Argument(metavar="QUESTION"),
+    ] = None,
+    output_format: Annotated[
+        str | None,
+        typer.Option(
+            ...,
+            "-f",
+            "--format",
+            metavar="FORMAT",
+            help="Specify the output format (e.g. 'table', 'json', etc.)",
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            ...,
+            "-o",
+            "--output",
+            metavar="PATH",
+            help="Specify a file to save the output to",
+        ),
+    ] = None,
+    fix: Annotated[
+        bool,
+        typer.Option(
+            ...,
+            "--fix",
+            help="Automatically fix issues if possible (e.g. by inferring missing choices from responses)",
+        ),
+    ] = False,
+) -> None:
+    """
+    Show all issues for the given question.
+    """
+
+    assignment, question = read_assignment_and_question(assignment_id, question_id)
+    result = question.validate_question_with_responses(question.get_responses())
+    responses = question.validate_responses(question.get_responses(), inplace=fix)
+
+    issues = [
+        issue
+        for issues in responses.values()
+        if rz.is_err(issues)
+        for issue in issues.error
+    ]
+
+    if rz.is_err(result):
+        issues.extend(result.error)
+
+    if issues:
+        for issue in sorted(set(issues)):
+            issue.display()
+            print()
+
+    if not issues:
+        rich.print("No issues found with this question 🥳.")
+    elif fix:
+        assignment.save()

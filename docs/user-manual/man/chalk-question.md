@@ -16,7 +16,6 @@ Lists questions, inspects one question, extracts choices, and converts question 
 
 - list ASSIGNMENT
 - show ASSIGNMENT QUESTION
-- choices ASSIGNMENT QUESTION
 - convert ASSIGNMENT QUESTION
 
 ## OPTIONS
@@ -32,6 +31,7 @@ Lists questions, inspects one question, extracts choices, and converts question 
 `-o, --output PATH`
 :   Specify the output file path. If not provided, output will be printed to the console.
 
+
 ### chalk question show ASSIGNMENT QUESTION
 
 `-f, --format FORMAT`
@@ -40,6 +40,7 @@ Lists questions, inspects one question, extracts choices, and converts question 
 `-o, --output PATH`
 :   Specify the output file path. If not provided, output will be printed to the console.
 
+
 ### chalk question choices ASSIGNMENT QUESTION
 
 `-f, --format FORMAT`
@@ -47,6 +48,7 @@ Lists questions, inspects one question, extracts choices, and converts question 
 
 `-o, --output PATH`
 :   Specify the output file path. If not provided, output will be printed to the console.
+
 
 ### chalk question convert ASSIGNMENT QUESTION
 

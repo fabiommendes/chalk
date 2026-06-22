@@ -9,8 +9,8 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSeriali
 
 from ..data import serializers as s
 from ..data import validators as v
+from ..types import Answer, QuestionId, SubmissionData
 from .grade import Grade, validate_grade
-from .types import Answer, QuestionId, SubmissionData
 
 if TYPE_CHECKING:
     from .assignment import Assignment

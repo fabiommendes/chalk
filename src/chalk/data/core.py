@@ -14,6 +14,7 @@ from rich.syntax import Syntax
 
 from .. import table as tb
 from ..table import Table
+from ..util.sequence import find_path
 
 __all__ = [
     "load_spreadsheet",
@@ -28,6 +29,18 @@ __all__ = [
 type Data = dict[str, Any] | list[Any]
 StructuredFormat = Literal["json", "yaml"]
 SpreadsheetFormat = Literal["csv", "xlsx"]
+
+VALID_YAML_TYPES = (
+    str,
+    int,
+    float,
+    bool,
+    type(None),
+    list,
+    dict,
+    datetime.datetime,
+    datetime.date,
+)
 
 
 def load_spreadsheet(path: Path, columns: list[str] | None = None) -> Table[str | None]:
@@ -115,24 +128,19 @@ def dump_structured_data(
             src = fd.getvalue()
             rich.print(Syntax(src, "yaml"))
         case ("yaml", _):
-            try:
-                stream = io.StringIO()
-                yaml.safe_dump(
-                    data,
-                    stream,
-                    allow_unicode=True,
-                    encoding="utf-8",
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
-                path.write(stream.getvalue())  # Atomic write
-            except yaml.YAMLError as e:
-                rich.print(data)
-                raise ValueError(f"Failed to serialize data to YAML: {e}") from e
+            fd = io.StringIO()
+            yaml_dump(data, fd)
+            src = fd.getvalue()
+            if not src.strip():
+                raise ValueError("Failed to serialize data: empty output")
+            path.write(src)  # Atomic write
+
         case ("json", _) | (None, _):
-            stream = io.StringIO()
-            json.dump(data, stream, indent=2, default=json_default)
-            path.write(stream.getvalue())  # Atomic write
+            fd = io.StringIO()
+            json.dump(data, fd, indent=2, default=json_default)
+            if not fd.getvalue().strip():
+                raise ValueError("Failed to serialize data: empty output")
+            path.write(fd.getvalue())  # Atomic write
         case other:
             assert_never(other)
 
@@ -221,3 +229,30 @@ def string_representer(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
 
 
 yaml.SafeDumper.add_representer(str, string_representer)
+
+
+#
+# Default dumpers
+#
+def yaml_dump(data: Any, stream: IO[str]) -> None:
+    try:
+        yaml.safe_dump(
+            data,
+            stream,
+            allow_unicode=True,
+            encoding="utf-8",
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    except yaml.YAMLError as e:
+
+        def is_invalid_object(obj: Any) -> bool:
+            return not isinstance(obj, VALID_YAML_TYPES)
+
+        pair = find_path(is_invalid_object, data)
+        if not pair:
+            raise ValueError(e)
+
+        path, invalid_obj = pair
+        msg = f"Failed to serialize data to YAML: Unsupported object found at {path}: {invalid_obj!r}"
+        raise ValueError(msg)

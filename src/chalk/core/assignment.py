@@ -4,7 +4,6 @@ from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from functools import partial
-from math import sqrt
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -12,41 +11,42 @@ from typing import (
     Any,
     Callable,
     Iterable,
+    Literal,
     Mapping,
     MutableSequence,
     cast,
     overload,
 )
 
+import errorz as rz
 import natsort
 import opt
 import pandas as pd
 import rich
-import toolz
 from pydantic import BaseModel, Field, model_validator
 from rich.prompt import Prompt
 
 from ..data import (
     dump_spreadsheet,
     dump_structured_data,
-    load_spreadsheet,
     load_structured_data,
 )
-from ..table import Table
-from ..util import clean_data
-from ..util.sequence import unique
-from .classroom import SPREADSHEET_EXTENSIONS, STRUCTURED_DATA_EXTENSIONS
-from .error import SystemError
-from .grade import Grade
-from .question import (
-    GenericQuestion,
+from ..question import (
+    Generic,
     Question,
     question_id,
     validate_question,
 )
+from ..table import Table
+from ..types import AssignmentId, QuestionId, StudentId
+from ..util import clean_data
+from ..util.decimal import normalize_decimal
+from ..util.sequence import unique
+from .classroom import SPREADSHEET_EXTENSIONS, STRUCTURED_DATA_EXTENSIONS
+from .error import SystemError
+from .grade import Grade
 from .student import Student
 from .submission import Response, Submission
-from .types import AssignmentId, QuestionId, StudentId
 
 if TYPE_CHECKING:
     from .classroom import Classroom
@@ -59,8 +59,8 @@ __all__ = [
 ]
 
 
-ASSIGNMENT_EXTENSIONS = SPREADSHEET_EXTENSIONS | STRUCTURED_DATA_EXTENSIONS
-ASSIGNMENT_IGNORE_LIST = {"__pycache__", ".DS_Store"}
+ASSIGNMENT_CONF_EXTENSIONS = STRUCTURED_DATA_EXTENSIONS
+ASSIGNMENT_IGNORE_LIST = {"__pycache__", "reports", "data", "scripts"}
 
 
 class Assignment(BaseModel):
@@ -136,10 +136,7 @@ class Assignment(BaseModel):
     #
     @property
     def base_path(self) -> Path:
-        if self.path.is_dir():
-            return self.path
-        else:
-            return self.path.parent / self.path.stem
+        return self.path.parent
 
     #
     # Dataframes
@@ -161,7 +158,10 @@ class Assignment(BaseModel):
 
         """
         questions = self.get_questions()
-        data = {id: q.model_dump() for id, q in questions.items()}
+        data = {
+            id: {"type": q.type, "grade": q.grade, "name": q.name, "id": q.id}
+            for id, q in questions.items()
+        }
 
         # Compute mean grade for each question if available
         acc_max: dict[QuestionId, Decimal] = defaultdict(Decimal)
@@ -188,16 +188,17 @@ class Assignment(BaseModel):
             N_skips = acc_skips[q_id]
             zero = Decimal(0)
 
-            item["skip_rate"] = N_skips / (N + N_skips) if N + N_skips > 0 else 0
+            skip_rate = N_skips / (N + N_skips) if N + N_skips > 0 else 0.0
+            item["skip_rate"] = normalize_decimal(skip_rate)
             item["grade_max"] = acc_max[q_id]
 
             m2 = S2 / N if N > 0 else zero
-            item["grade_mean"] = mean = S / N if N > 0 else zero
-            item["grade_std"] = sqrt(m2 - mean**2)
+            mean = S / N if N > 0 else zero
+            item["grade_mean"] = mean = normalize_decimal(mean)
+            item["grade_std"] = normalize_decimal((m2 - mean**2).sqrt())
 
-        df = pd.DataFrame(data.values())[
-            "id name type grade grade_mean grade_max grade_std skip_rate".split()
-        ]
+        columns = "id name type grade grade_mean grade_max grade_std skip_rate".split()
+        df = pd.DataFrame(data.values())[columns]
         df.set_index("id", inplace=True)
 
         return df
@@ -222,14 +223,17 @@ class Assignment(BaseModel):
         for submission in (self.submissions or {}).values():
             question_ids.update(submission.responses.keys())
 
-        return {
-            q_id: GenericQuestion(id=q_id, _assignment=self) for q_id in question_ids
-        }
+        return {q_id: Generic(id=q_id, _assignment=self) for q_id in question_ids}
 
     #
     # Display user info
     #
-    def display(self) -> None:
+    def dump(
+        self,
+        path: Path | None = None,
+        format: Literal["table", "csv", "json", "yaml"] | None = None,
+        sort: Literal["id", "name", "grade", "value"] | None = None,
+    ) -> None:
         """
         Display details about the assignment to the console.
         """
@@ -241,8 +245,33 @@ class Assignment(BaseModel):
             rich.print(f" - [b]End:[/] {self.end.isoformat()}")
 
         if self.questions:
+            grades = self.get_grades(total="_total")
+            totals = cast(list[Decimal], grades.get_column("_total"))
+
+            grades_cell = None
+            max_grade = None
+            if totals:
+                N = len(totals)
+                max_grade = max(totals)
+                mean = normalize_decimal(sum(totals) / N)
+                s2 = sum((t**2 for t in totals), Decimal(0)) / N
+                std = normalize_decimal((s2 - mean * mean).sqrt())
+                grades_cell = f"{mean} ± {std}"
+
             table = self.question_table()
-            table.render()
+            table.dump(
+                path,
+                format=format,
+                sort=sort,
+                last_row={
+                    "id": "total",
+                    "name": self.name,
+                    "grades": grades_cell,
+                    "max grade": max_grade,
+                    "value": sum(table.get_column("value"), Decimal(0)),  # type: ignore
+                },
+                styles={"id": "bold yellow", "value": "bold blue"},
+            )
 
     def info(self) -> dict[str, Any]:
         """
@@ -250,6 +279,8 @@ class Assignment(BaseModel):
         """
 
         df = self.question_statistics_dataframe()
+        print(df)
+        print(df.dtypes)
         return {
             "id": self.id,
             "name": self.name,
@@ -314,7 +345,7 @@ class Assignment(BaseModel):
         if total is True:
             total = "total"
         if total:
-            df[total] = df.sum(axis=1, numeric_only=True)
+            df[total] = df.replace({pd.NA: 0, None: 0}).sum(axis=1)
 
         df.sort_index(inplace=True)
         return Table.from_dataframe(df)
@@ -384,7 +415,9 @@ class Assignment(BaseModel):
                 responses[student_id] = response
         return responses
 
-    def question_table(self, prec: int = 2) -> Table[str | None]:
+    def question_table(
+        self, prec: int = 2, statistics: pd.DataFrame | None = None
+    ) -> Table[str | None]:
         """
         Get a formatted table with question information for display.
         """
@@ -393,7 +426,11 @@ class Assignment(BaseModel):
             return f"{num:.{prec}f}" if not pd.isna(num) else "N/A"
 
         def format_percent(num: float) -> str:
-            return f"{100 * num:.{prec}f}%" if not pd.isna(num) else "N/A"
+            if pd.isna(num) or num is None:
+                return "N/A"
+            pc = f"{100 * num:.{prec}f}"
+            pc = pc.rstrip("0").removesuffix(".") or "0"
+            return f"{pc}%"
 
         def format_grades(row: pd.Series[float]) -> str:
             mean = row["grade_mean"]
@@ -406,7 +443,7 @@ class Assignment(BaseModel):
 
             return f"{mean:.{prec}f} ± {std:.{prec}f} ({format_percent(percent)})"
 
-        df = self.question_statistics_dataframe()
+        df = self.question_statistics_dataframe() if statistics is None else statistics
         df["grades"] = df.apply(format_grades, axis=1)
         df["value"] = df["grade"]
         df["skip rate"] = df["skip_rate"].apply(format_percent)
@@ -430,7 +467,7 @@ class Assignment(BaseModel):
                     for q_id, response in entry.responses.items():
                         row.update(
                             {
-                                f"{q_id}": response.answer,
+                                f"{q_id}": opt.map(str, response.answer),
                                 f"{q_id}.grade": str(response.grade),
                                 f"{q_id}.feedback": response.feedback,
                                 f"{q_id}.start": opt.map(
@@ -491,22 +528,13 @@ def iter_assignments(
     """
     from ..conf import find_project_root
 
-    path = find_project_root(root) / "assignments"
-    if not path.exists():
+    root = find_project_root(root)
+    if not root.exists():
         return
 
-    paths = sorted(
-        filter(
-            lambda p: not non_assignment_path(p),
-            path.iterdir(),
-        )
-    )
-
-    groups = toolz.groupby(lambda p: p.stem, paths)
-    while groups:
-        stem, paths = groups.popitem()
-        path = sorted(paths, key=path_priority)[0]
-        yield stem, partial(_read_assignment_at, path)
+    for path in natsort.natsorted(root.iterdir(), key=lambda p: p.stem):
+        if (conf := assignment_compatible_path(path)) is not None:
+            yield conf.parent.name, partial(_read_assignment_at, conf)
 
 
 def _read_assignment_by_id(
@@ -527,17 +555,6 @@ def _read_assignment_at(path: Path, /) -> Assignment:
     Read the assignment file at the given path and return an Assignment object.
     """
     match path.suffix:
-        case ".csv" | ".xlsx" if path.is_file():
-            assignment = {"id": path.stem, "path": path, "data": {}}
-            sheet = load_spreadsheet(path)
-            template = sheet.get("")
-            if template:
-                sheet = sheet.select_rows(lambda id, _: id != "")
-                questions = read_questions(template)
-                assignment["questions"] = {q.id: q for q in questions}
-
-            return Assignment.model_validate(assignment)
-
         case ".json" | ".yaml" | ".yml" if path.is_file():
             data = load_structured_data(path)
             if isinstance(data, list):
@@ -596,15 +613,28 @@ def read_questions[T](template: Mapping[str, T]) -> list[Question]:
     return [validate_question(q) for q in questions.values()]
 
 
-def non_assignment_path(path: Path) -> bool:
+def assignment_compatible_path(path: Path) -> Path | None:
     """
-    Return True if the path is not an assignment file or directory.
+    Return True if the path is an assignment directory.
     """
-    return (
-        path.name in ASSIGNMENT_IGNORE_LIST
-        or path.name.startswith(".")
-        or (not path.is_dir() and path.suffix not in ASSIGNMENT_EXTENSIONS)
-    )
+    from . import validate_assignment_id
+
+    # Invalidate the following conditions:
+    if not path.is_dir():
+        return None
+    if path.name.startswith(".") or path.name.startswith("_"):
+        return None
+    if path.name in ASSIGNMENT_IGNORE_LIST:
+        return None
+    if not rz.call_checked(ValueError, validate_assignment_id, path.name):
+        return None
+
+    # Only accept valid folder names with a /conf.{yaml|json} file
+    for conf in path.glob("conf.*"):
+        if conf.suffix in ASSIGNMENT_CONF_EXTENSIONS:
+            return conf
+
+    return None
 
 
 def path_priority(path: Path) -> int:

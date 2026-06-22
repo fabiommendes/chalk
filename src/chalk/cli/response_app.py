@@ -76,13 +76,14 @@ def view(
         max_grade = f"/[blue]{question.grade}[/]" if question.grade is not None else ""
 
         rich.print(f"[bold green]{assignment.name}, {question.title}[/]")
-        rich.print(f"[dim]Grade: {opt.unwrap_or(response.grade, 'N/A')}[/]{max_grade}")
+        rich.print(f"[dim]Grade: {opt.unwrap(response.grade, 'N/A')}[/]{max_grade}")
         rich.print()
 
     if output is None:
         question.display_answer(response.answer, rich=not plain)
     elif response.answer:
-        output.write_text(response.answer)
+        # FIXME: correct dump file
+        output.write_text(str(response.answer))
     else:
         rich.print("[yellow]No answer found for this question.[/]", file=sys.stderr)
         raise typer.Exit(1)

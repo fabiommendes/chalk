@@ -4,8 +4,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+from ..types import StudentId
 from .student import Student
-from .types import StudentId
 
 NO_GRADE = None
 SPREADSHEET_EXTENSIONS = {".csv", ".xlsx"}

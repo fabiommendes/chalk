@@ -1,4 +1,5 @@
 import builtins
+import re
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Callable
@@ -49,3 +50,7 @@ def decimal(value: Decimal, /) -> Any:
 
 def enum(value: Enum, /) -> str:
     return value.name
+
+
+def regex(value: re.Pattern[str], /) -> str:
+    return value.pattern

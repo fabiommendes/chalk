@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import decimal
-from contextlib import contextmanager
 from decimal import Decimal
 from functools import total_ordering
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Generator,
     Literal,
     overload,
 )
 
-from ..types import JSON
+from ..protocols import JSON
+from ..util.decimal import format_decimal, get_decimal_context, normalize_decimal
 from ..util.parsing import read_parens
 from . import adjustment as adj
 from . import disqualification as dq
@@ -23,17 +21,11 @@ from .disqualification import Disqualification
 if TYPE_CHECKING:
     pass
 
-DECIMAL_PRECISION = 2
 
 type Context = Literal["assignment", "question", "final"]
 
 
-__all__ = [
-    "Grade",
-    "set_precision",
-    "get_precision",
-    "default_precision",
-]
+__all__ = ["Grade"]
 
 
 @total_ordering
@@ -98,21 +90,31 @@ class Grade:
         """
         return parse(src)
 
+    @classmethod
+    def validate(cls, value: Any) -> Grade:
+        """
+        Convert a value to a Grade object.
+
+        If the value is already a Grade, it is returned as-is. Raise a ValueError
+        if the value cannot be converted to a Grade.
+        """
+        return validate_grade(value)
+
     def __init__(
         self,
         value: str | float | int | Decimal = "0",
         *,
-        adjustment: Adjustment | None = None,
-        disqualification: Disqualification | None = None,
+        adj: Adjustment | None = None,
+        disqualify: Disqualification | None = None,
     ):
-        if adjustment and disqualification:
+        if adj and disqualify:
             msg = "A grade cannot have both an override and a disqualification."
             raise ValueError(msg)
 
-        value = normalize(Decimal(value, context=get_context()))
+        value = normalize_decimal(Decimal(value, context=get_decimal_context()))
         self._value = value
-        self._adjustment = adjustment
-        self._disqualification = disqualification
+        self._adjustment = adj
+        self._disqualification = disqualify
 
     def __str__(self) -> str:
         return self.to_json(force_string=True)
@@ -139,7 +141,41 @@ class Grade:
     def __lt__(self, other: object) -> bool:
         if isinstance(other, Grade):
             return self.value < other.value
+        if isinstance(other, (int, float, Decimal)):
+            return self.value < other
         return self._value.__lt__(other)  # type: ignore
+
+    def __add__(self, other: Grade | Decimal | int) -> Decimal:
+        if isinstance(other, Grade):
+            return self.value + other.value
+        return self.value.__add__(other)
+
+    def __radd__(self, other: Decimal | int) -> Decimal:
+        return other + self.value
+
+    def __mul__(self, other: Grade | Decimal | int) -> Decimal:
+        if isinstance(other, Grade):
+            return self.value * other.value
+        return self.value.__mul__(other)
+
+    def __rmul__(self, other: Decimal | int) -> Decimal:
+        return other * self.value
+
+    def __sub__(self, other: Grade | Decimal | int) -> Decimal:
+        if isinstance(other, Grade):
+            return self.value - other.value
+        return self.value.__sub__(other)
+
+    def __rsub__(self, other: Decimal | int) -> Decimal:
+        return other - self.value
+
+    def __truediv__(self, other: Grade | Decimal | int) -> Decimal:
+        if isinstance(other, Grade):
+            return self.value / other.value
+        return self.value.__truediv__(other)
+
+    def __rtruediv__(self, other: Decimal | int) -> Decimal:
+        return other / self.value
 
     @overload
     def to_json(self, *, force_string: Literal[True]) -> str: ...
@@ -199,8 +235,8 @@ class Grade:
         """
         return Grade(
             self._value,
-            disqualification=disqualification,
-            adjustment=self._adjustment,
+            disqualify=disqualification,
+            adj=self._adjustment,
         )
 
     def adjust(self, adjustment: Adjustment | None, /) -> Grade:
@@ -209,8 +245,8 @@ class Grade:
         """
         return Grade(
             self._value,
-            adjustment=adjustment,
-            disqualification=self._disqualification,
+            adj=adjustment,
+            disqualify=self._disqualification,
         )
 
 
@@ -231,7 +267,7 @@ def parse(src: str) -> Grade:
         [rest, reason] = dq.read(rest)
         rest = rest.strip()
         if not rest:
-            return Grade(0, disqualification=reason)
+            return Grade(0, disqualify=reason)
 
         rest, data = read_parens(rest)
         if rest.strip():
@@ -244,7 +280,7 @@ def parse(src: str) -> Grade:
 
     # Finally, we try to read adjusted grades.
     adjustment, value = adj.parse(rest)
-    return Grade(value, adjustment=adjustment)
+    return Grade(value, adj=adjustment)
 
 
 def validate_grade(value: Any) -> Grade:
@@ -262,77 +298,3 @@ def validate_grade(value: Any) -> Grade:
         return Grade(value)
     else:
         raise ValueError(f"Cannot convert {value!r} to a Grade.")
-
-
-def format_decimal(value: Decimal) -> str:
-    """
-    Format a Decimal value as a string with the current global precision.
-    """
-    with default_precision() as normalize:
-        value = normalize(value)
-        return "{value:.{precision}f}".format(value=value, precision=get_precision())
-
-
-#
-# Control global decimal precision
-#
-def set_precision(precision: int) -> None:
-    """
-    Set the global decimal precision for grade rendering.
-
-    Usually called once when the global configuration is loaded.
-    """
-    if precision < 0:
-        raise ValueError("Precision must be a non-negative integer.")
-
-    global DECIMAL_PRECISION
-    DECIMAL_PRECISION = precision
-
-
-@contextmanager
-def default_precision() -> Generator[Callable[[Decimal], Decimal], None, None]:
-    """
-    Get the current global decimal precision for grade rendering.
-    """
-    old_round = decimal.getcontext().rounding
-    decimal.getcontext().rounding = decimal.ROUND_HALF_UP
-    try:
-        yield normalize
-    finally:
-        decimal.getcontext().rounding = old_round
-
-
-def get_precision() -> int:
-    """
-    Get the current global decimal precision for grade rendering.
-    """
-    return DECIMAL_PRECISION
-
-
-def get_context(_memo: dict[int, decimal.Context] = {}) -> decimal.Context:
-    """
-    Get a decimal context with the current global precision for grade rendering.
-    """
-    try:
-        return _memo[id(DECIMAL_PRECISION)]
-    except KeyError:
-        context = decimal.Context(
-            rounding=decimal.ROUND_HALF_UP,
-        )
-        _memo[id(DECIMAL_PRECISION)] = context
-        return context
-
-
-def normalize(value: Decimal) -> Decimal:
-    """
-    Normalize a Decimal value to the current global precision for grade rendering.
-    """
-    value = value.normalize()
-
-    if value.adjusted() >= 0:
-        return value
-    try:
-        return round(value, DECIMAL_PRECISION)
-    except decimal.DecimalException:
-        print("round error", value, value.as_tuple())
-        return value

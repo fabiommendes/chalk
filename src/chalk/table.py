@@ -43,8 +43,8 @@ type Entries[Id, T] = dict[Id, dict[str, T]]
 
 # Parameters
 type RenderFn = Callable[[Any], str] | dict[type | str, Callable[[Any], str]]
-type RowKey[T, Id] = str | Callable[[Id, Mapping[str, T]], Any]
-
+type RowKey[Id, T] = str | RowKeyFn[Id, T]
+type RowKeyFn[Id, T] = Callable[[Id, Row[T]], Any]
 
 DT = TypeVar("DT", str, float, int, bool, None)
 NOT_GIVEN = object()
@@ -163,6 +163,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         sort: str | None = None,
         reverse: bool = False,
         empty: str = "[b yellow]Warning:[/] no data to display!",
+        last_row: dict[str, Any] | None = None,
     ) -> None:
         """
         Dump the table to a file or the console in the specified format.
@@ -177,6 +178,20 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         elif format is None:
             format = "table"
 
+        if last_row and not format == "table":
+            out = self.append(last_row)
+            return out.dump(
+                file,
+                format=format,
+                styles=styles,
+                names=names,
+                align=align,
+                render=render,
+                sort=sort,
+                reverse=reverse,
+                empty=empty,
+            )
+
         match format:
             case "table":
                 with as_stream(file) as f:
@@ -189,6 +204,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
                             reverse=reverse,
                             render=render,
                             empty=empty,
+                            last_row=last_row,
                         )
 
             case "csv":
@@ -220,6 +236,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         render: RenderFn | None = None,
         title: str | None = None,
         empty: str = "[b yellow]Warning:[/] no data to display!",
+        last_row: dict[str, Any] | None = None,
     ) -> None:
         """
         Render a table to the console using Rich.
@@ -236,16 +253,14 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
             indexes = natsort.index_humansorted(sort_key, reverse=reverse)
             data = data.from_dataframe(df.iloc[indexes])
         elif sort is not None:
-            data = data.order_by(
-                lambda id, row: (
-                    (
-                        cell := render_with(row.get(sort), column=sort, render=render)
-                        or ""
-                    )
-                    and cell.casefold()
-                ),
-                reverse=reverse,
-            )
+
+            def sort_with(id: Id, row: Row[DT], /) -> Any:
+                value = row.get(sort)
+                cell = render_with(value, column=sort, render=render) or ""
+                return (value is not None, cell, cell.casefold())
+
+            key: RowKeyFn[Id, DT] = sort_with
+            data = data.order_by(key, reverse=reverse)
 
         table = RichTable(title=title)
 
@@ -265,10 +280,19 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
                 justify=align.get(column, "left"),
             )
 
-        for id, row in data.items():
+        for i, (id, row) in enumerate(data.items()):
             cells: list[str] = [render_with(id, column="id", render=render)]
             for column in data.columns:
                 cell = row.get(column)
+                cells.append(render_with(cell, column=column, render=render))
+            table.add_row(
+                *cells, end_section=(i == len(data) - 1) and last_row is not None
+            )
+
+        if last_row is not None:
+            cells = [render_with(last_row.get("id"), column="id", render=render)]
+            for column in data.columns:
+                cell = last_row.get(column)
                 cells.append(render_with(cell, column=column, render=render))
             table.add_row(*cells)
 
@@ -325,6 +349,16 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
             ids = [id for id, row in self.items() if fn(id, row)]
         return self.from_dataframe(self._df.loc[list(ids)])
 
+    def get_column(self, column: str, default: DT | None = None) -> list[DT]:
+        """
+        Get a column from the table by name, returning a list of values.
+        """
+        if column not in self.columns:
+            if default is not None:
+                return [default] * len(self)
+            raise KeyError(f"Column '{column}' does not exist in the table.")
+        return self._df[column].replace({np.nan: None}).tolist()  # type: ignore
+
     def clean(
         self,
         *,
@@ -348,7 +382,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         columns = [k for k in self.columns if k in keep]
         return self.from_dataframe(self._df[columns])
 
-    def order_by(self, key: RowKey[DT, Id], reverse: bool = False) -> Self:
+    def order_by(self, key: RowKey[Id, DT], /, reverse: bool = False) -> Self:
         """
         Return a copy of the table ordered by the specified key function.
         """
@@ -360,6 +394,18 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         df["__sort_key"] = data
         df.sort_values("__sort_key", inplace=True, ascending=not reverse)
         df.drop(columns="__sort_key", inplace=True)
+        return self.from_dataframe(df)
+
+    def append(self, row: Row[DT], /) -> Self:
+        """
+        Return a new table with the specified row appended to the end.
+        """
+        row = dict(row)
+        id: Any = row.pop("id", None)
+        if id is None:
+            id = len(self._df)
+        df = self._df.copy()
+        df = pd.concat([df, pd.DataFrame([row], index=[str(id)])], ignore_index=False)
         return self.from_dataframe(df)
 
 
@@ -415,7 +461,7 @@ def render_with(
     """
     Render a cell value by using the render function for the column or type if provided.
     """
-    from .core.grade import get_precision
+    from .util.decimal import format_decimal
 
     if value is None:
         return "[red]-[/]"
@@ -424,7 +470,7 @@ def render_with(
     if isinstance(value, int):
         return str(value)
     if isinstance(value, (float, Decimal)):
-        data = f"{{value:.{get_precision()}f}}".format(value=value)
+        data = format_decimal(value)
         if value == 0:
             return f"[dim]{data}[/]"
         if value < 0:

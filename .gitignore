@@ -1,4 +1,3 @@
-# Python-generated files
 __pycache__/
 *.py[oc]
 build/
@@ -6,6 +5,9 @@ dist/
 site/
 wheels/
 *.egg-info
-
-# Virtual environments
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
 .venv
+.coverage
+.stignore

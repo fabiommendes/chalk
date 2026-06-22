@@ -1,14 +1,14 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterator, overload
 
 from typing_extensions import Protocol
 
+from ..types import StudentId
 from ..util.parsing import Parsed
 from ..util.sequence import unique
-from .types import StudentId
-
-type Disqualification = Simple | Plagiarism | Multiple
 
 __all__ = [
     "Disqualification",
@@ -29,6 +29,8 @@ class DisqualificationProtocol(Protocol):
 
     def message(self) -> str: ...
     def display(self) -> str: ...
+
+    def __or__(self, other: Disqualification) -> Disqualification: ...
 
 
 def Timeout() -> Disqualification:
@@ -67,6 +69,14 @@ class Simple(Enum):
     def display(self) -> str:
         return self.name.lower().replace("_", "-")
 
+    def __lt__(self, other: Disqualification) -> Disqualification:
+        if not isinstance(other, Disqualification):
+            return NotImplemented
+        return merge(self, other)
+
+    def __repr__(self) -> str:
+        return f"{self.name.lower().title()}()"
+
 
 @dataclass(frozen=True)
 class Plagiarism:
@@ -83,6 +93,11 @@ class Plagiarism:
 
     def display(self) -> str:
         return f"plagiarism[{self.from_student}]"
+
+    def __lt__(self, other: Disqualification) -> Disqualification:
+        if not isinstance(other, Disqualification):
+            return NotImplemented
+        return merge(self, other)
 
 
 @dataclass(frozen=True)
@@ -112,6 +127,14 @@ class Multiple:
                 yield from reason.iter_reasons()
             else:
                 yield reason
+
+    def __lt__(self, other: Disqualification) -> Disqualification:
+        if not isinstance(other, Disqualification):
+            return NotImplemented
+        return merge(self, other)
+
+    def __repr__(self) -> str:
+        return " | ".join(repr(reason) for reason in self.reasons)
 
 
 def parse(src: str) -> Disqualification:
@@ -161,6 +184,13 @@ def read(src: str) -> Parsed[Disqualification]:
     raise ValueError(
         f"String format not supported for disqualification parsing: {src!r}"
     )
+
+
+#
+# The disqualification type
+#
+# We define here because we need it during runtime.
+Disqualification = Simple | Plagiarism | Multiple
 
 
 @overload

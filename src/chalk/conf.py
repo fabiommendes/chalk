@@ -8,6 +8,7 @@ from .core.classroom import (
     Classroom,
 )
 from .core.error import SystemError
+from .util.decimal import set_decimal_precision
 
 
 def find_project_root(path: Path | None = None) -> Path:
@@ -70,7 +71,6 @@ def get_classroom(path: Path | None = None) -> Classroom:
 
     Raises RuntimeError if no configuration file is found.
     """
-    from .core.grade import set_precision
 
     with get_conf_file(path).open("rb") as fd:
         data = tomllib.load(fd)["chalk"]
@@ -79,7 +79,7 @@ def get_classroom(path: Path | None = None) -> Classroom:
     model = Classroom.model_validate(data)
 
     # Set global precision
-    set_precision(model.decimal_precision)
+    set_decimal_precision(model.decimal_precision)
     return model
 
 

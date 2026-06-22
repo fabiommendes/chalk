@@ -3,8 +3,15 @@ from pathlib import Path
 
 
 class Repo:
-    def __init__(self, dest: Path) -> None:
-        self.base_path = dest
+    """
+    A repository of files related to a single response.
+
+    It tracks all created files and directories. Files created by external
+    processes are not tracked.
+    """
+
+    def __init__(self, base: Path, /) -> None:
+        self.base = base
         self._written_files: set[Path] = set()
 
     def copy_source(self, source: Path, link: bool = False) -> None:
@@ -18,7 +25,7 @@ class Repo:
         for base, _, filenames in source.walk():
             for filename in filenames:
                 source_file = base / filename
-                dest_file = self.base_path / source_file.relative_to(source)
+                dest_file = self.base / source_file.relative_to(source)
                 dest_file.parent.mkdir(parents=True, exist_ok=True)
 
                 if source_file.is_dir():
@@ -35,7 +42,7 @@ class Repo:
         Write the given content to a file at the specified relative path within
         the destination directory.
         """
-        full_path = self.base_path / relative_path
+        full_path = self.base / relative_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         if isinstance(content, str):
@@ -51,7 +58,7 @@ class Repo:
         even if it was not created by this FileWriter.
         """
         path = Path(relative_path)
-        full_path = self.base_path / path
+        full_path = self.base / path
         self._written_files.discard(full_path)
 
         if full_path.exists():
@@ -60,7 +67,7 @@ class Repo:
             else:
                 full_path.unlink()
 
-    def clear(self, force: bool = False) -> None:
+    def clear_tracked(self, force: bool = False) -> None:
         """
         Remove all files that were previously written to the destination
         directory.
@@ -68,7 +75,7 @@ class Repo:
         If force is True, also remove any files created outside of the
         FileWriter's control (e.g. files that were copied but not tracked).
         """
-        remove_dirs = {self.base_path}
+        remove_dirs = {self.base}
         while self._written_files:
             file = self._written_files.pop()
             if file.exists():
@@ -77,7 +84,7 @@ class Repo:
                 else:
                     file.unlink()
                     parent = file.parent
-                    while parent != self.base_path:
+                    while parent != self.base:
                         remove_dirs.add(parent)
                         parent = parent.parent
 
@@ -86,3 +93,9 @@ class Repo:
                 dir.rmdir()
             except OSError:
                 pass
+
+    def clear_all(self) -> None:
+        """
+        Remove repository from filesystem.
+        """
+        shutil.rmtree(self.base, ignore_errors=True)

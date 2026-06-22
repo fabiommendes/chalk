@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from .types import StudentId
+from ..types import StudentId
 
 if TYPE_CHECKING:
     from .classroom import Classroom

@@ -1,16 +1,19 @@
 import datetime
 import sys
 from decimal import Decimal
-from typing import Annotated, Literal
+from pathlib import Path
+from typing import Annotated, Iterable, Literal
 
+import opt
 import rich
 import typer
 
 from ..conf import find_project_root
+from ..core import Grade, question
 from ..core.assignment import Assignment, iter_assignments
-from ..core.question import GenericQuestion
 from ..env import ask_optional_string
-from ..table import Table
+from ..table import Table, validate_table_format
+from ..util.decimal import format_decimal, normalize_decimal
 from .util import safe
 
 app = typer.Typer(help="Manage the student roster.", no_args_is_help=True)
@@ -43,6 +46,7 @@ def list_assignments(
 
     rows = []
     ids: list[str] = []
+
     for id, loader in iter_assignments():
         try:
             assignment = loader()
@@ -61,6 +65,10 @@ def list_assignments(
 
         ids.append(id)
         rows.append(cells)
+
+    if not ids:
+        rich.print("No assignment found!")
+        return
 
     table = Table(rows, index=ids)
     table = table.select_columns(["name", "start", "end"])
@@ -162,7 +170,9 @@ def create(
                 default=assignment_id,
             ),
             submissions={},
-            questions={id: GenericQuestion(id=id, grade=Decimal(1)) for id in questions}
+            questions={
+                id: question.Generic(id=id, grade=Decimal(1)) for id in questions
+            }
             if questions
             else None,
         )
@@ -202,6 +212,36 @@ def show(
             help="Show which students have not submitted the assignment.",
         ),
     ] = False,
+    sort: Annotated[
+        str,
+        typer.Option(
+            ...,
+            "-s",
+            "--sort",
+            help="Sort by id, name, start, or end",
+            metavar="COLUMN",
+        ),
+    ] = "id",
+    output_format: Annotated[
+        str | None,
+        typer.Option(
+            ...,
+            "-f",
+            "--format",
+            metavar="FORMAT",
+            help="Specify the output format (e.g. 'table', 'json', etc.)",
+        ),
+    ] = None,
+    output_path: Annotated[
+        Path | None,
+        typer.Option(
+            ...,
+            "-o",
+            "--output",
+            metavar="PATH",
+            help="Specify a file to save the output to",
+        ),
+    ] = None,
 ) -> None:
     """
     Show details of an assignment.
@@ -209,10 +249,22 @@ def show(
     assignment = Assignment.prompt(assignment_id)
 
     if not missing and not grades:
-        assignment.display()
+        assignment.dump(
+            output_path,
+            format=opt.map(validate_table_format, output_format),
+        )
     elif grades:
-        table = assignment.get_grades(total=True)
-        table.render()
+        table = assignment.get_grades(total="total")
+        table.dump(
+            output_path,
+            format=opt.map(validate_table_format, output_format),
+            styles={"id": "bold yellow", "total": "bold"},
+            sort=sort,
+            last_row={
+                "id": "mean",
+                "total": render_mean(table.get_column("total")),
+            },
+        )
     elif missing:
         raise NotImplementedError("Missing submission report is not yet implemented")
 
@@ -261,3 +313,14 @@ def merge(
     msg = f"Merging assignments '{assignment1.name}' and '{assignment2.name}' into '{output_id}'..."
     print(msg)
     raise NotImplementedError("Assignment merging is not yet implemented")
+
+
+#
+# Utilities
+#
+def render_mean(data: Iterable[Decimal | Grade | None]) -> str | None:
+    filtered = opt.filter(data)
+    numbers = list(map(normalize_decimal, filtered))  # type: ignore
+    if (n := len(numbers)) == 0:
+        return None
+    return format_decimal(sum(numbers, Decimal(0)) / n)

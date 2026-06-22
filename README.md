@@ -29,8 +29,8 @@ or install it globally using pip:
 pip install chalk
 ```
 
-I prefer the alias method, but to each their own. I you use Windows, I recommend
-replacing your operating system with something decent 😘.
+If you use Windows, consider replacing your operating system with something 
+decent that is not trying to spy on you 🧐. 
 
 Usage
 -----
@@ -49,16 +49,20 @@ assignments and grades. A basic structure looks like this:
 
 ```
 classroom/
-├── assignments/
-│   ├── midterm/
-│   │   ├── index.json
-│   │   ├── student_1/
-│   │   ├── ...
-│   │   └── student_n/
-│   └── final.json
 ├── reports/
 │   ├── midterm.grades.csv
 │   └── final.grades.csv
+├── data/
+│   ├── ...
+│   ├── student_n/
+│   └── conf.yaml
+├── midterm/
+│   ├── student_1/
+│   ├── ...
+│   ├── student_n/
+│   └── conf.yaml
+├── final/
+│   └── conf.yaml
 ├── chalk.toml
 └── roster.csv
 ```

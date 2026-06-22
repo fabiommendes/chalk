@@ -66,12 +66,12 @@ def grade(draw: st.DrawFn) -> Grade:
         case "adjustment":
             return Grade(
                 draw(_decimals),
-                adjustment=draw(adjustment()),
+                adj=draw(adjustment()),
             )
         case "disqualification":
             return Grade(
                 draw(_decimals),
-                disqualification=draw(disqualification()),
+                disqualify=draw(disqualification()),
             )
         case _:
             raise RuntimeError

@@ -9,29 +9,15 @@ This section is generated automatically from the Python source code.
 
 ## Core modules and entities
 
-### chalk.assignment
+### chalk.core
 
-::: chalk.assignment
+::: chalk.core
 
-### chalk.classroom
+::: chalk.conf
 
-::: chalk.classroom
+::: chalk.env
 
-### chalk.question
-
-::: chalk.question
-
-### chalk.roster
-
-::: chalk.roster
-
-### chalk.student
-
-::: chalk.student
-
-### chalk.submission
-
-::: chalk.submission
+::: chalk.info
 
 
 ## CLI modules
@@ -40,25 +26,18 @@ This section is generated automatically from the Python source code.
 
 ::: chalk.cli
 
-### chalk.cli.list_resources
-
-::: chalk.cli.list_resources
-
-### chalk.cli.question
-
-::: chalk.cli.question
-
-### chalk.cli.report
-
-::: chalk.cli.report
-
-### chalk.cli.response
-
-::: chalk.cli.response
-
 
 ## Chalk utilities
 
 ### chalk.table
 
 ::: chalk.table
+
+### chalk.util.*
+
+::: chalk.util.file
+
+::: chalk.util.sequence
+
+::: chalk.util.parsing
+
