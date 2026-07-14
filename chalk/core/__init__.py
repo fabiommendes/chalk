@@ -5,7 +5,6 @@ from .answer import AnyAnswer, validate_answer
 from .classroom import Classroom
 from .disqualification import Disqualification
 from .error import ChalkError, ChalkErrorEnum
-from .grade import Grade
 from .models import QuestionId, QuestionType, QuizId, StudentId
 from .quiz import Quiz
 from .student import Student
@@ -26,7 +25,6 @@ __all__ = [
     "Classroom",
     "disqualification",
     "Disqualification",
-    "Grade",
     "models",
     "question",
     "Question",
