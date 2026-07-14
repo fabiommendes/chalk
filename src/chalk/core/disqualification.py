@@ -2,35 +2,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterator, overload
+from typing import TYPE_CHECKING, Any, Iterator, Literal, TypeIs, overload
 
-from typing_extensions import Protocol
+from rich.console import RenderableType
+from rich.text import Text
 
-from ..types import StudentId
 from ..util.parsing import Parsed
 from ..util.sequence import unique
+
+if TYPE_CHECKING:
+    from .models import StudentId
 
 __all__ = [
     "Disqualification",
     "Plagiarism",
     "Multiple",
     "Timeout",
-    "Invalid",
+    "InvalidInput",
     "Error",
     "parse",
     "merge",
 ]
-
-
-class DisqualificationProtocol(Protocol):
-    """
-    A protocol for disqualification reasons.
-    """
-
-    def message(self) -> str: ...
-    def display(self) -> str: ...
-
-    def __or__(self, other: Disqualification) -> Disqualification: ...
 
 
 def Timeout() -> Disqualification:
@@ -40,11 +32,11 @@ def Timeout() -> Disqualification:
     return Simple.TIMEOUT
 
 
-def Invalid() -> Disqualification:
+def InvalidInput() -> Disqualification:
     """
     Indicates that a response was disqualified due to invalid syntax or format.
     """
-    return Simple.INVALID
+    return Simple.INVALID_INPUT
 
 
 def Error() -> Disqualification:
@@ -60,14 +52,17 @@ class Simple(Enum):
     """
 
     TIMEOUT = "The response took too long to execute."
-    INVALID = "The response contains text with an invalid syntax."
+    INVALID_INPUT = "The response contains text with an invalid syntax."
     ERROR = "Internal error during grading."
 
     def message(self) -> str:
         return self.value
 
-    def display(self) -> str:
+    def render(self) -> str:
         return self.name.lower().replace("_", "-")
+
+    def __str__(self) -> str:
+        return self.render()
 
     def __lt__(self, other: Disqualification) -> Disqualification:
         if not isinstance(other, Disqualification):
@@ -76,6 +71,12 @@ class Simple(Enum):
 
     def __repr__(self) -> str:
         return f"{self.name.lower().title()}()"
+
+    def __bool__(self) -> Literal[False]:
+        return False
+
+    def __rich__(self) -> RenderableType:
+        return Text(self.render(), style="red")
 
 
 @dataclass(frozen=True)
@@ -87,17 +88,24 @@ class Plagiarism:
     from_student: StudentId
 
     def message(self) -> str:
-        return (
-            f"The response was flagged for plagiarism from student {self.from_student}."
-        )
+        return f"The response was flagged for plagiarism from student {self.from_student}."
 
-    def display(self) -> str:
+    def render(self) -> str:
         return f"plagiarism[{self.from_student}]"
 
     def __lt__(self, other: Disqualification) -> Disqualification:
         if not isinstance(other, Disqualification):
             return NotImplemented
         return merge(self, other)
+
+    def __str__(self) -> str:
+        return self.render()
+
+    def __bool__(self) -> Literal[False]:
+        return False
+
+    def __rich__(self) -> RenderableType:
+        return Text(self.render(), style="red")
 
 
 @dataclass(frozen=True)
@@ -118,8 +126,8 @@ class Multiple:
             f"- {reason.message()}" for reason in self.reasons
         )
 
-    def display(self) -> str:
-        return "disqualified: " + ", ".join(reason.display() for reason in self.reasons)
+    def render(self) -> str:
+        return "disqualified: " + ", ".join(reason.render() for reason in self.reasons)
 
     def iter_reasons(self) -> Iterator[Disqualification]:
         for reason in self.reasons:
@@ -135,6 +143,15 @@ class Multiple:
 
     def __repr__(self) -> str:
         return " | ".join(repr(reason) for reason in self.reasons)
+
+    def __str__(self) -> str:
+        return self.render()
+
+    def __bool__(self) -> Literal[False]:
+        return False
+
+    def __rich__(self) -> RenderableType:
+        return Text(self.render(), style="red")
 
 
 def parse(src: str) -> Disqualification:
@@ -154,14 +171,20 @@ def read(src: str) -> Parsed[Disqualification]:
 
     Raise ValueError for invalid strings.
     """
-    if src == "timeout":
+    if src.startswith("timeout"):
         return Parsed(src.removeprefix("timeout"), Timeout())
-    if src == "invalid":
-        return Parsed(src.removeprefix("invalid"), Invalid())
+
+    if src.startswith("invalid input"):
+        return Parsed(src.removeprefix("invalid input"), InvalidInput())
+
+    if src.startswith("error"):
+        return Parsed(src.removeprefix("error"), Error())
+
     if src.startswith("plagiarism[") and "]" in src:
         from_student, sep, rest = src.removeprefix("plagiarism[").partition("]")
         if sep:
             return Parsed(rest, Plagiarism(from_student))
+
     if src.startswith("disqualified: "):
         reasons: list[Disqualification] = []
         rest = src.removeprefix("disqualified: ")
@@ -181,9 +204,7 @@ def read(src: str) -> Parsed[Disqualification]:
             result: Disqualification = _multiple(reasons)  # type: ignore
             return Parsed(rest, result)
 
-    raise ValueError(
-        f"String format not supported for disqualification parsing: {src!r}"
-    )
+    raise ValueError(f"String format not supported for disqualification parsing: {src!r}")
 
 
 #
@@ -193,19 +214,22 @@ def read(src: str) -> Parsed[Disqualification]:
 Disqualification = Simple | Plagiarism | Multiple
 
 
+def is_disqualification(obj: Any, /) -> TypeIs[Disqualification]:
+    """
+    True if argument is a disqualification.
+    """
+    return isinstance(obj, (Simple, Plagiarism, Multiple))
+
+
 @overload
 def merge(a: Disqualification, b: Disqualification) -> Disqualification: ...
 
 
 @overload
-def merge(
-    a: Disqualification | None, b: Disqualification | None
-) -> Disqualification | None: ...
+def merge(a: Disqualification | None, b: Disqualification | None) -> Disqualification | None: ...
 
 
-def merge(
-    a: Disqualification | None, b: Disqualification | None
-) -> Disqualification | None:
+def merge(a: Disqualification | None, b: Disqualification | None) -> Disqualification | None:
     """
     Merge two disqualifications into a single disqualification.
     """

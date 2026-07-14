@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import csv
-import datetime
 import io
-import json
 from pathlib import Path
-from typing import IO, Any, Collection, Literal, Sequence, assert_never, cast, overload
+from typing import IO, Any, Collection, Literal, Sequence, assert_never, cast, get_args, overload
 
 import rich
-import yaml
-from pydantic import BaseModel
 from rich.syntax import Syntax
 
-from .. import table as tb
 from ..table import Table
-from ..util.sequence import find_path
+from ..types import JSON
+from ..util.path import write_text as _write_text
+from . import json, yaml
 
 __all__ = [
     "load_spreadsheet",
@@ -27,23 +24,17 @@ __all__ = [
 ]
 
 type Data = dict[str, Any] | list[Any]
+type StructuredData = Data | JSON
+type SpreadsheetData = list[dict[str, Any]]
+
 StructuredFormat = Literal["json", "yaml"]
 SpreadsheetFormat = Literal["csv", "xlsx"]
 
-VALID_YAML_TYPES = (
-    str,
-    int,
-    float,
-    bool,
-    type(None),
-    list,
-    dict,
-    datetime.datetime,
-    datetime.date,
-)
+STRUCTURED_FORMAT_ALIASES: dict[str, StructuredFormat] = {"yml": "yaml"}
+DEFAULT_BACKUPS: int | bool = False
 
 
-def load_spreadsheet(path: Path, columns: list[str] | None = None) -> Table[str | None]:
+def load_spreadsheet(path: Path, /, columns: list[str] | None = None) -> Table[str | None]:
     """
     Load a spreadsheet file and return a list of dictionaries representing the rows.
     """
@@ -80,9 +71,9 @@ def load_structured_data(path: Path) -> Data:
     """
     data: Any
     if path.suffix == ".json":
-        data = json.loads(path.read_text())
+        data = json.load(path.open())
     elif path.suffix in [".yaml", ".yml"]:
-        data = yaml.safe_load(path.read_text())
+        data = yaml.load(path.open())
     else:
         raise ValueError(f"Unsupported structured data format: {path.suffix}")
 
@@ -93,64 +84,107 @@ def load_structured_data(path: Path) -> Data:
 
 @overload
 def dump_structured_data(
-    data: Data,
+    data: StructuredData,
     path: Path,
+    /,
+    *,
+    backup: bool | int = DEFAULT_BACKUPS,
 ) -> None: ...
 
 
 @overload
 def dump_structured_data(
-    data: Data,
+    data: StructuredData,
     path: IO[str] | IO[bytes] | Path | None = None,
+    /,
+    *,
     format: StructuredFormat | None = None,
+    backup: bool | int = DEFAULT_BACKUPS,
 ) -> None: ...
 
 
 def dump_structured_data(
-    data: Data,
-    path: Any = None,
+    data: StructuredData,
+    path: IO[str] | IO[bytes] | Path | None = None,
+    /,
+    *,
     format: StructuredFormat | None = None,
+    backup: bool | int = DEFAULT_BACKUPS,
 ) -> None:
     """
     Save a dictionary or list to a structured json-like data file.
     """
+
     if format is None and isinstance(path, Path):
         format = validate_structured_format(path.suffix.removeprefix(".").lower())
-    if isinstance(path, Path):
-        path = path.open("w")  # automatically closes when function exit
 
-    match (format, path):
-        case ("json", None) | (None, None):
-            rich.print_json(json.dumps(data, indent=2, default=json_default))
-        case ("yaml", None):
-            fd = io.StringIO()
-            dump_structured_data(data, fd, format="yaml")
-            src = fd.getvalue()
-            rich.print(Syntax(src, "yaml"))
-        case ("yaml", _):
-            fd = io.StringIO()
-            yaml_dump(data, fd)
-            src = fd.getvalue()
+    if path is None:
+        match format:
+            case "json" | None:
+                rich.print_json(json.dumps(data))
+            case "yaml":
+                fd = io.StringIO()
+                dump_structured_data(data, fd, format="yaml")
+                src = fd.getvalue()
+                rich.print(Syntax(src, "yaml"))
+            case _:
+                assert_never(format)
+        return
+
+    match format:
+        case "json" | None:
+            src = json.dumps(data)
             if not src.strip():
                 raise ValueError("Failed to serialize data: empty output")
-            path.write(src)  # Atomic write
+            write_text(path, src, rotate=backup)
 
-        case ("json", _) | (None, _):
-            fd = io.StringIO()
-            json.dump(data, fd, indent=2, default=json_default)
-            if not fd.getvalue().strip():
+        case "yaml":
+            src = yaml.dumps(data)
+            if not src.strip():
                 raise ValueError("Failed to serialize data: empty output")
-            path.write(fd.getvalue())  # Atomic write
+            write_text(path, src, rotate=backup)
+
         case other:
             assert_never(other)
 
 
+@overload
 def dump_spreadsheet(
+    data: Table[str | None] | Table[str],
     path: Path,
-    data: Table[str | None],
+    /,
+    *,
+    format: SpreadsheetFormat | None = None,
+    columns: list[str] | None = None,
+    split_by: Collection[str] | None,
+    keep: Sequence[str] | None = None,
+    backup: bool | int = DEFAULT_BACKUPS,
+) -> None: ...
+
+
+@overload
+def dump_spreadsheet(
+    data: Table[str | None] | Table[str],
+    path: Path | IO[str] | IO[bytes] | None = None,
+    /,
+    *,
+    format: SpreadsheetFormat | None = None,
+    columns: list[str] | None = None,
+    keep: Sequence[str] | None = None,
+    backup: bool | int = DEFAULT_BACKUPS,
+) -> None: ...
+
+
+def dump_spreadsheet(
+    data: Table[Any],
+    path: Path | None | IO[str] | IO[bytes] = None,
+    /,
+    *,
+    format: SpreadsheetFormat | None = None,
     columns: list[str] | None = None,
     split_by: Collection[str] | None = None,
     keep: Sequence[str] | None = None,
+    backup: bool | int = DEFAULT_BACKUPS,
 ) -> None:
     """
     Save a list of dictionaries representing rows to a spreadsheet file.
@@ -159,100 +193,95 @@ def dump_spreadsheet(
         return
 
     if split_by is not None:
-        for suffix in split_by:
-            partial = data.select_columns(lambda k: k.endswith("." + suffix))
-            if not partial:
-                continue
-            if keep:
-                partial = tb.merge(
-                    data.select_columns(keep),
-                    partial,
-                )
-            partial_path = path.with_name(f"{path.stem}{suffix}{path.suffix}")
-            dump_spreadsheet(partial_path, partial, columns=columns)
+        raise NotImplementedError("Split by multiple files is not implemented yet")
+
+    if format is None and isinstance(path, Path):
+        format = validate_spreadsheet_format(path.suffix.removeprefix(".").lower())
+
+    if path is None:
+        fd = io.StringIO()
+        dump_spreadsheet(data, fd, columns=columns, backup=backup, format="csv")
         return
 
-    if path.suffix == ".csv":
-        stream = io.StringIO()
-        if columns is None:
-            columns = list(data.iloc(0).keys())
-        writer = csv.DictWriter(stream, fieldnames=columns)
-        writer.writeheader()
-        writer.writerows(data.to_dicts())
+    match format:
+        case "csv" | None:
+            stream = io.StringIO()
+            if columns is None:
+                columns = ["id", *data.iloc(0).keys()]
+            writer = csv.DictWriter(stream, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows(data.to_dicts())
 
-        # Atomic write to avoid data loss if the process is interrupted
-        path.write_text(stream.getvalue())
-
-    elif path.suffix in [".xlsx", ".xls"]:
-        raise NotImplementedError("Excel spreadsheet support is not implemented yet")
-    else:
-        raise ValueError(f"Unsupported spreadsheet format: {path.suffix}")
-
-
-def json_default(obj: Any) -> Any:  # -> str | list[Any]:
-    """
-    Handle additional types when serializing to JSON, such as Path objects.
-    """
-    if isinstance(obj, Path):
-        return str(obj)
-    elif isinstance(obj, set):
-        return list(obj)
-    elif isinstance(obj, (datetime.datetime, datetime.date)):
-        return obj.isoformat()
-    elif isinstance(obj, Table):
-        return obj.to_dicts()
-    elif isinstance(obj, BaseModel):
-        return obj.model_dump()
-
-    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+            # Atomic write to avoid data loss if the process is interrupted
+            write_text(path, stream.getvalue(), rotate=backup)
+        case "xlsx":
+            msg = "Excel spreadsheet support is not implemented yet"
+            raise NotImplementedError(msg)
+        case _:
+            raise ValueError(f"Unsupported spreadsheet format: {path.suffix}")
 
 
 def validate_structured_format(format: str) -> StructuredFormat:
     """
     Validate that the given format is a supported structured data format.
     """
-    if format in ["json", "yaml"]:
+    format = format.lower()
+    if format in get_args(StructuredFormat):
         return cast(StructuredFormat, format)
+    elif format in STRUCTURED_FORMAT_ALIASES:
+        return STRUCTURED_FORMAT_ALIASES[format]
     else:
         msg = f"Unsupported data format: {format}, expect one of: json, yaml"
         raise ValueError(msg)
 
 
-#
-# Loaders and serializers
-#
-def string_representer(dumper: yaml.SafeDumper, data: str) -> yaml.Node:
-    if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+def validate_spreadsheet_format(format: str) -> SpreadsheetFormat:
+    """
+    Validate that the given format is a supported spreadsheet data format.
+    """
+    if format in get_args(SpreadsheetFormat):
+        return cast(SpreadsheetFormat, format)
     else:
-        return dumper.represent_str(data)
-
-
-yaml.SafeDumper.add_representer(str, string_representer)
-
-
-#
-# Default dumpers
-#
-def yaml_dump(data: Any, stream: IO[str]) -> None:
-    try:
-        yaml.safe_dump(
-            data,
-            stream,
-            allow_unicode=True,
-            encoding="utf-8",
-            default_flow_style=False,
-            sort_keys=False,
-        )
-    except yaml.YAMLError as e:
-
-        def is_invalid_object(obj: Any) -> bool:
-            return not isinstance(obj, VALID_YAML_TYPES)
-
-        pair = find_path(is_invalid_object, data)
-        if not pair:
-            raise ValueError(e)
-
-        path, invalid_obj = pair
-        msg = f"Failed to serialize data to YAML: Unsupported object found at {path}: {invalid_obj!r}"
+        msg = f"Unsupported spreadsheet format: {format}, expect one of: csv, xlsx"
         raise ValueError(msg)
+
+
+def write_text(
+    path: IO[str] | IO[bytes] | Path,
+    data: str,
+    *,
+    encoding: str = "utf-8",
+    rotate: int = 5,
+) -> int:
+    """
+    Write text to a file or stream, with optional backup rotation for files.
+    """
+    if not data:
+        raise ValueError(f"Trying to write empty data to {path}")
+
+    if isinstance(path, Path):
+        return _write_text(path, data, encoding=encoding, rotate=rotate)
+
+    byte_stream = cast(IO[bytes], path)
+    str_stream = cast(IO[str], path)
+
+    def has_mode(obj: Any, mode: str) -> bool:
+        return hasattr(obj, "mode") and isinstance(obj.mode, str) and mode in obj.mode
+
+    if isinstance(path, io.TextIOBase) or not has_mode(path, "b"):
+        return str_stream.write(data)
+
+    if isinstance(path, io.RawIOBase | io.BufferedIOBase) or has_mode(path, "b"):
+        return byte_stream.write(data.encode(encoding))
+
+    # Fallback to string and then bytes writing
+    try:
+        return str_stream.write(data)
+    except TypeError:
+        pass
+
+    try:
+        return byte_stream.write(data.encode(encoding))
+    except TypeError:
+        pass
+    raise TypeError(f"Unsupported path type: {type(path)}")

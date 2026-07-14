@@ -10,7 +10,7 @@ chalk response <subcommand> <args> <options>
 
 ## DESCRIPTION
 
-Handles response-level workflows for a given assignment.
+Handles response-level workflows for a given quiz.
 
 ## SUBCOMMANDS
 
@@ -54,7 +54,7 @@ should be named `<name>.transform.<ext>`.
 
 ### chalk response validate [ASSIGNMENT QUESTION]
 
-Validate responses for a given assignment or question.
+Validate responses for a given quiz or question.
 
 User can declare custom validators at `<project_root>/scripts/`. The scripts 
 should be named `<name>.validate.<ext>`.
@@ -82,7 +82,7 @@ should be named `<name>.validate.<ext>`.
 # See some student submission
 chalk response view exam-01 q1 s123 
 
-# Transform responses for an assignment
+# Transform responses for a quiz
 chalk response transform exam-01 q1 -s s123 -t text.lowercase
 ```
 

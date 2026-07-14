@@ -4,10 +4,12 @@ from typing import Any, Callable, Iterable, Mapping, overload
 
 @overload
 def clean_data[K, V](data: dict[K, V | None], /) -> dict[K, V]: ...
-
-
 @overload
 def clean_data[K, V](data: list[dict[K, V | None]], /) -> list[dict[K, V]]: ...
+@overload
+def clean_data[K, V](data: set[dict[K, V | None]], /) -> set[dict[K, V]]: ...
+@overload
+def clean_data[K, V](data: tuple[dict[K, V | None]], /) -> tuple[dict[K, V]]: ...
 
 
 def clean_data(data: Any) -> Any:
@@ -16,6 +18,10 @@ def clean_data(data: Any) -> Any:
     """
     if isinstance(data, list):
         return [clean_data(item) for item in data]
+    if isinstance(data, set):
+        return {clean_data(item) for item in data}
+    if isinstance(data, tuple):
+        return tuple(clean_data(item) for item in data)
     elif isinstance(data, dict):
         return {k: clean_data(v) for k, v in data.items() if v is not None}
     else:

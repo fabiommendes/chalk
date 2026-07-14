@@ -7,7 +7,7 @@ from logging import getLogger
 from typing import TYPE_CHECKING, Callable, Generator
 
 if TYPE_CHECKING:
-    from ..core import Grade
+    pass
 
 log = getLogger(__name__)
 
@@ -36,7 +36,7 @@ def default_decimal_precision() -> Generator[Callable[[Decimal], Decimal], None,
     old_round = decimal.getcontext().rounding
     decimal.getcontext().rounding = decimal.ROUND_HALF_UP
     try:
-        yield normalize_decimal
+        yield as_chalk_decimal
     finally:
         decimal.getcontext().rounding = old_round
 
@@ -62,7 +62,7 @@ def get_decimal_context(_memo: dict[int, decimal.Context] = {}) -> decimal.Conte
         return context
 
 
-def normalize_decimal(value: Decimal | float | int | Grade, /) -> Decimal:
+def as_chalk_decimal(value: Decimal | float | int | str, /) -> Decimal:
     """
     Normalize a Decimal value to the current global precision for grade rendering.
     """
@@ -70,9 +70,16 @@ def normalize_decimal(value: Decimal | float | int | Grade, /) -> Decimal:
         value = Decimal(value)
     elif isinstance(value, Decimal):
         pass
-    else:
-        value = value.value
+    elif isinstance(value, str):
+        value = Decimal(value)
 
+    return chalk_decimal(value)
+
+
+def chalk_decimal(value: Decimal) -> Decimal:
+    """
+    Normalize a Decimal value to the current global precision for grade rendering.
+    """
     value = value.normalize()
     _, _, exponent = value.as_tuple()
 
@@ -87,7 +94,7 @@ def normalize_decimal(value: Decimal | float | int | Grade, /) -> Decimal:
     return value
 
 
-def format_decimal(value: Decimal | float | int, /) -> str:
+def render_decimal(value: Decimal | float | int, /) -> str:
     """
     Format a Decimal value as a string with the current global precision.
     """
@@ -96,6 +103,4 @@ def format_decimal(value: Decimal | float | int, /) -> str:
 
     with default_decimal_precision() as normalize:
         value = normalize(value)
-        return "{value:.{precision}f}".format(
-            value=value, precision=get_decimal_precision()
-        )
+        return "{value:.{precision}f}".format(value=value, precision=get_decimal_precision())

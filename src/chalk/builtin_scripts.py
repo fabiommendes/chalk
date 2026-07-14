@@ -6,10 +6,10 @@ from typing import Any, Callable, overload
 
 from unidecode import unidecode
 
-from .core import Answer
+from .core import AnyAnswer
 
-type Transform = Callable[[Answer | None], Answer | None]
-type Validator = Callable[[Answer | None], bool]
+type Transform = Callable[[AnyAnswer | None], AnyAnswer | None]
+type Validator = Callable[[AnyAnswer | None], bool]
 
 TRANSFORM_REGISTRY: dict[str, Transform] = {}
 VALIDATOR_REGISTRY: dict[str, Validator] = {}
@@ -68,13 +68,13 @@ def validator(
 
 
 def string_transform(
-    name: str, func: Callable[[str], Answer | None], *, doc: str | None = None
+    name: str, func: Callable[[str], AnyAnswer | None], *, doc: str | None = None
 ) -> Transform:
     """
     A decorator that marks a function as a response transformation that operates on strings.
     """
 
-    def wrapper(answer: Answer | None, /) -> Answer | None:
+    def wrapper(answer: AnyAnswer | None, /) -> AnyAnswer | None:
         if isinstance(answer, str):
             return func(answer)
         return answer
@@ -89,7 +89,7 @@ def string_validator(
     A decorator that marks a function as a response validator that operates on strings.
     """
 
-    def wrapper(answer: Answer | None, /) -> bool:
+    def wrapper(answer: AnyAnswer | None, /) -> bool:
         if isinstance(answer, str):
             return func(answer)
         return False

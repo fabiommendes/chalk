@@ -12,11 +12,12 @@ def get_env_classroom(value: str | None, interactive: bool | None = None) -> str
     if value is not None:
         return value
 
-    if get_interactivity(interactive):
-        return Prompt.ask("Classroom name", default=get_env_classroom(None))
+    default = Path.cwd().name
 
-    cwd = Path.cwd()
-    return cwd.name
+    if get_interactivity(interactive):
+        return Prompt.ask("Classroom name", default=default)
+
+    return default
 
 
 def get_env_teacher(value: str | None, interactive: bool | None = None) -> str:
@@ -26,13 +27,12 @@ def get_env_teacher(value: str | None, interactive: bool | None = None) -> str:
     if value is not None:
         return value
 
+    default = os.environ.get("CHALK_USER") or os.getlogin()
+
     if get_interactivity(interactive):
-        return Prompt.ask("Teacher name", default=get_env_teacher(None))
+        return Prompt.ask("Teacher name", default=default)
 
-    if value := os.environ.get("CHALK_USER"):
-        return value
-
-    return os.getlogin()
+    return default
 
 
 def get_interactivity(value: bool | None) -> bool:
@@ -42,11 +42,7 @@ def get_interactivity(value: bool | None) -> bool:
     if value is not None:
         return value
 
-    return (
-        os.isatty(0)
-        and os.isatty(1)
-        and os.environ.get("CHALK_INTERACTIVE", "1") == "1"
-    )
+    return os.isatty(0) and os.isatty(1) and os.environ.get("CHALK_INTERACTIVE", "1") == "1"
 
 
 @overload

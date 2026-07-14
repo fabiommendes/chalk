@@ -6,6 +6,7 @@ from .core import (
     dump_structured_data,
     load_spreadsheet,
     load_structured_data,
+    validate_spreadsheet_format,
     validate_structured_format,
 )
 
@@ -17,6 +18,7 @@ __all__ = [
     "load_spreadsheet",
     "load_structured_data",
     "validate_structured_format",
+    "validate_spreadsheet_format",
     "serializers",
     "validators",
 ]

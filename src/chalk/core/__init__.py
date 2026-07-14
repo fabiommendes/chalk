@@ -1,16 +1,14 @@
 from .. import question
-from .. import question as _question
 from ..question import Question
-from ..types import Answer, AssignmentId, QuestionId, QuestionType, StudentId
-from . import disqualification
-from . import submission as _submission
-from .assignment import Assignment, iter_assignments
+from . import disqualification, models
+from .answer import AnyAnswer, validate_answer
 from .classroom import Classroom
 from .disqualification import Disqualification
-from .error import ChalkError, SystemError
+from .error import ChalkError, ChalkErrorEnum
 from .grade import Grade
+from .models import QuestionId, QuestionType, QuizId, StudentId
+from .quiz import Quiz
 from .student import Student
-from .submission import Response, Submission
 
 INVALID_ASSIGNMENT_NAMES = {
     "chalk",
@@ -22,31 +20,27 @@ INVALID_ASSIGNMENT_NAMES = {
 }
 
 __all__ = [
-    "Answer",
-    "Assignment",
-    "AssignmentId",
+    "AnyAnswer",
+    "ChalkError",
+    "ChalkErrorEnum",
+    "Classroom",
+    "disqualification",
+    "Disqualification",
     "Grade",
+    "models",
     "question",
     "Question",
     "QuestionId",
     "QuestionType",
-    "Response",
-    "Submission",
+    "Quiz",
+    "QuizId",
     "Student",
     "StudentId",
-    "Classroom",
-    "ChalkError",
-    "SystemError",
-    "iter_assignments",
-    "disqualification",
-    "Disqualification",
-    "validate_assignment_id",
+    "validate_answer",
+    "validate_quiz_id",
+    # "Response",
+    # "Submission",
 ]
-
-
-_submission.Assignment = Assignment  # type: ignore
-_question.Assignment = Assignment  # type: ignore
-Assignment.model_rebuild()
 
 
 def validate_question_id(src: str) -> QuestionId:
@@ -56,11 +50,11 @@ def validate_question_id(src: str) -> QuestionId:
     return _validate_entity_id(src, "question")
 
 
-def validate_assignment_id(src: str) -> AssignmentId:
+def validate_quiz_id(src: str) -> QuizId:
     """
-    Return a valid AssignmentId from string or raise ValueError.
+    Return a valid QuizId from string or raise ValueError.
     """
-    return _validate_entity_id(src, "assignment")
+    return _validate_entity_id(src, "quiz")
 
 
 def _validate_entity_id(src: str, /, entity: str) -> str:

@@ -15,15 +15,18 @@ from typing import (
     cast,
     overload,
 )
+from warnings import deprecated
 
 import natsort
 import numpy as np
 import pandas as pd
 import rich
-from rich.console import JustifyMethod
+from rich.console import JustifyMethod, RenderableType
 from rich.table import Table as RichTable
+from rich.text import Text
 
-from .util.file import StreamLike, as_stream
+from .util import clean_data
+from .util.path import StreamLike, as_stream
 
 __all__ = [
     "Table",
@@ -107,6 +110,9 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
 
     def __bool__(self) -> bool:
         return len(self.index) > 0
+
+    def __rich__(self) -> RenderableType:
+        return self.render()
 
     #
     # Internal utilities
@@ -196,7 +202,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
             case "table":
                 with as_stream(file) as f:
                     with redirect_stdout(f):
-                        self.render(
+                        self.print(
                             styles=styles,
                             names=names,
                             align=align,
@@ -226,6 +232,36 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
                 msg = f"{format.upper()} output is not yet implemented"
                 raise NotImplementedError(msg)
 
+    @deprecated("Use rich.print(table.render()) instead.")
+    def print(
+        self,
+        styles: None | dict[str, str] = None,
+        names: None | dict[str, str] = None,
+        align: None | dict[str, JustifyMethod] = None,
+        sort: str | None = None,
+        reverse: bool = False,
+        render: RenderFn | None = None,
+        title: str | None = None,
+        empty: RenderableType = Text.assemble(("Warning:", "bold yellow"), " no data to display!"),
+        last_row: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Render a table to the console using Rich.
+        """
+        rich.print(
+            self.render(
+                styles=styles,
+                names=names,
+                align=align,
+                sort=sort,
+                reverse=reverse,
+                render=render,
+                title=title,
+                empty=empty,
+                last_row=last_row,
+            )
+        )
+
     def render(
         self,
         styles: None | dict[str, str] = None,
@@ -235,15 +271,14 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         reverse: bool = False,
         render: RenderFn | None = None,
         title: str | None = None,
-        empty: str = "[b yellow]Warning:[/] no data to display!",
+        empty: RenderableType = Text.assemble(("Warning:", "bold yellow"), " no data to display!"),
         last_row: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> RichTable | RenderableType:
         """
         Render a table to the console using Rich.
         """
         if not bool(self):
-            rich.print(empty)
-            return
+            return empty
 
         data = self
 
@@ -285,9 +320,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
             for column in data.columns:
                 cell = row.get(column)
                 cells.append(render_with(cell, column=column, render=render))
-            table.add_row(
-                *cells, end_section=(i == len(data) - 1) and last_row is not None
-            )
+            table.add_row(*cells, end_section=(i == len(data) - 1) and last_row is not None)
 
         if last_row is not None:
             cells = [render_with(last_row.get("id"), column="id", render=render)]
@@ -296,20 +329,26 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
                 cells.append(render_with(cell, column=column, render=render))
             table.add_row(*cells)
 
-        rich.print(table)
+        return table
 
-    def to_dicts(self, clear_nones: bool = False) -> list[dict[str, DT]]:
-        result = cast(Rows[DT], self._df_with_nones().to_dict(orient="records"))
+    def to_dicts(self, *, clear_nones: bool = False, drop_id: bool = False) -> list[dict[str, DT]]:
+        df = self._df_with_nones()
+        result = df.to_dict(orient="records")
+
+        if not drop_id:
+            for id, row in zip(self.index, result):
+                row["id"] = id
+
         if clear_nones:
-            return [{k: v for k, v in row.items() if v is not None} for row in result]
-        return result
+            result = [clean_data(row) for row in result]
+
+        return cast(Rows[DT], result)
 
     def to_indexed_data(self, clear_nones: bool = False) -> dict[Id, dict[str, DT]]:
         result = cast(Entries[Id, DT], self._df_with_nones().to_dict(orient="index"))
         if clear_nones:
             return {
-                id: {k: v for k, v in row.items() if v is not None}
-                for id, row in result.items()
+                id: {k: v for k, v in row.items() if v is not None} for id, row in result.items()
             }
         return result
 
@@ -461,7 +500,7 @@ def render_with(
     """
     Render a cell value by using the render function for the column or type if provided.
     """
-    from .util.decimal import format_decimal
+    from .core.decimal import render_decimal
 
     if value is None:
         return "[red]-[/]"
@@ -470,7 +509,7 @@ def render_with(
     if isinstance(value, int):
         return str(value)
     if isinstance(value, (float, Decimal)):
-        data = format_decimal(value)
+        data = render_decimal(value)
         if value == 0:
             return f"[dim]{data}[/]"
         if value < 0:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 from functools import total_ordering
-from typing import Any, Iterable, Literal, Self, cast
+from typing import Any, Iterable, Literal, Mapping, Self, cast
 
 import rich
 
@@ -16,7 +16,7 @@ type IssueLevelLike = (
 
 @dataclass(frozen=True)
 @total_ordering
-class Issue[Code = str, Scope = str, Target = Any]:
+class Issue:
     """
     An issue with in the system that may prevent correct behavior.
 
@@ -32,10 +32,10 @@ class Issue[Code = str, Scope = str, Target = Any]:
     @classmethod
     def critical(
         cls,
-        code: Code,
+        code: str,
         message: str | None = None,
-        scopes: Iterable[Scope] | None = None,
-    ) -> Issue[Code, Scope]:
+        scopes: Iterable[str] | None = None,
+    ) -> Issue:
         """
         Create a critical issue with the given code and message.
         """
@@ -49,10 +49,10 @@ class Issue[Code = str, Scope = str, Target = Any]:
     @classmethod
     def error(
         cls,
-        code: Code,
+        code: str,
         message: str | None = None,
-        scopes: Iterable[Scope] | None = None,
-    ) -> Issue[Code, Scope]:
+        scopes: Iterable[str] | None = None,
+    ) -> Issue:
         """
         Create an error issue with the given code and message.
         """
@@ -66,10 +66,10 @@ class Issue[Code = str, Scope = str, Target = Any]:
     @classmethod
     def warning(
         cls,
-        code: Code,
+        code: str,
         message: str | None = None,
-        scopes: Iterable[Scope] | None = None,
-    ) -> Issue[Code, Scope]:
+        scopes: Iterable[str] | None = None,
+    ) -> Issue:
         """
         Create a warning issue with the given code and message.
         """
@@ -80,10 +80,10 @@ class Issue[Code = str, Scope = str, Target = Any]:
             scopes=frozenset(scopes or ()),
         )
 
-    code: Code
+    code: str
     message: str | None = None
     severity: IssueLevel = field(default_factory=lambda: IssueLevel.ERROR)
-    scopes: frozenset[Scope] = field(default_factory=frozenset)
+    scopes: frozenset[str] = field(default_factory=frozenset)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Issue):
@@ -112,7 +112,7 @@ class Issue[Code = str, Scope = str, Target = Any]:
             self.message or "",
         )
 
-    def with_scopes(self, scopes: Iterable[Scope]) -> Self:
+    def with_scopes(self, scopes: Iterable[str]) -> Self:
         """
         Return a new issue with the given scope added.
         """
@@ -144,9 +144,10 @@ class Issue[Code = str, Scope = str, Target = Any]:
 
 
 class IssueLevel(enum.IntFlag):
-    CRITICAL = 1
+    CRITICAL = 4
     ERROR = 2
-    WARNING = 4
+    WARNING = 1
+    INFO = 0
     ALL = CRITICAL | ERROR | WARNING
 
     @classmethod
@@ -169,6 +170,33 @@ class IssueLevel(enum.IntFlag):
                 case _:
                     raise ValueError(f"Invalid issue level: {v}")
         return level
+
+    def as_set(self) -> set[IssueLevel]:
+        """
+        Return a set of the individual issue levels that make up this level.
+        """
+        levels = set()
+        for level in IssueLevel:
+            if self & level:
+                levels.add(level)
+        return levels
+
+    def accepts(self, level: IssueLevel) -> bool:
+        """
+        Check if this issue level accepts issues with the given severity.
+
+        Example:
+
+            >>> IssueLevel.ALL.accepts(IssueLevel.WARNING)
+            True
+            >>> (IssueLevel.ERROR | IssueLevel.CRITICAL).accepts(IssueLevel.WARNING)
+            False
+            >>> (IssueLevel.ERROR | IssueLevel.WARNING).accepts(IssueLevel.CRITICAL)
+            False
+        """
+        if self & level:
+            return True
+        return any(x < level for x in self.as_set())
 
 
 def render_severity(severity: IssueLevel | None, rich_text: bool = True) -> str:
@@ -194,3 +222,59 @@ def fmt(obj: Any, style: str, rich_text: bool = True) -> str:
         return f"[{style}]{obj}[/]"
     else:
         return str(obj)
+
+
+ERROR_ALIASES = {
+    "TypeError": "type-error",
+    "ValueError": "error",
+    "FileNotFoundError": "not-found",
+}
+
+
+def list_of_issues(
+    obj: Any,
+    scopes: Iterable[str],
+    severity: IssueLevelLike = IssueLevel.ERROR,
+    code: str = "error",
+) -> list[Issue]:
+    """
+    Convert an exception to a list of issues. If the exception is an IssueError,
+    return its issues. Otherwise, create a new issue with the exception's message.
+    """
+    if isinstance(obj, Issue):
+        return [obj]
+    elif isinstance(obj, str):
+        return [Issue.error(code, obj, scopes=scopes)]
+    elif isinstance(obj, int):
+        return [Issue.error(f"error-{obj}", f"Error: {obj}", scopes=scopes)]
+    elif isinstance(obj, Iterable):
+        issues = []
+        for item in obj:
+            issues.extend(list_of_issues(item, scopes, severity))
+        if not issues:
+            return [Issue.error(code, "Unknown error.", scopes=scopes)]
+        return issues
+    elif isinstance(obj, Mapping):
+        issues = []
+        for key, value in obj.items():
+            issues.extend(
+                list_of_issues(
+                    value,
+                    scopes,
+                    severity,
+                    code=f"{code}{key}",
+                ),
+            )
+        return issues
+    elif isinstance(obj, ValueError):
+        return list_of_issues(obj.args, scopes, severity)
+    elif isinstance(obj, Exception):
+        error = type(obj).__name__
+        issue = Issue.error(
+            ERROR_ALIASES.get(error, "error"),
+            f"{error}: {obj}",
+            scopes=scopes,
+        )
+        return [issue]
+    else:
+        return [Issue.error(code, f"Unknown error: {obj}", scopes=scopes)]

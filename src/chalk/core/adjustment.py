@@ -7,7 +7,7 @@ from typing import Iterable, Literal, TypeGuard, cast, get_args, overload
 
 import opt
 
-from ..types import Numeric, to_decimal
+from ..numeric import Numeric, add, mul, to_decimal
 from ..util.parsing import Parsed, read_number, read_parens
 
 REASON = re.compile(r"([a-z_]+)\s+")
@@ -19,7 +19,6 @@ AdjustmentReason = Literal[
     "regraded",
     "late",
     "early",
-    None,
 ]
 
 
@@ -50,12 +49,33 @@ class Adjustment:
         return self._override
 
     @property
-    def reason(self) -> AdjustmentReason:
+    def reason(self) -> AdjustmentReason | None:
         return self._reason
 
     @property
     def description(self) -> str | None:
         return self._description
+
+    @property
+    def method(
+        self,
+    ) -> Literal["relative", "absolute", "overriden", "comment", "affine"]:
+        """
+        The method used for this adjustment.
+
+        Comment is a special case of relative adjustment with relative=1 and
+        absolute=0.
+        """
+        if self.override is not None:
+            return "overriden"
+        if self.relative == 1 and self.absolute == 0:
+            return "comment"
+        elif self.relative != 1:
+            return "relative"
+        elif self.relative == 1:
+            return "absolute"
+        else:
+            return "affine"
 
     #
     # Utility constructors for common cases
@@ -80,56 +100,44 @@ class Adjustment:
         """
         Create an adjustment that overrides the grade with the given value and reason "points_given".
         """
-        return Adjustment(
-            override=value, reason="points_given", description=description
-        )
+        return Adjustment(override=value, reason="points_given", description=description)
 
     @classmethod
-    def late_pc(cls, percentage: Numeric, description: str | None = None) -> Adjustment:
+    def late_pc(
+        cls, percentage: Decimal | int | float, description: str | None = None
+    ) -> Adjustment:
         """
         Create an adjustment that multiplies the grade by (1 - percentage) with
         reason "late".
         """
         return Adjustment(
-            relative=1 - Decimal(percentage) / Decimal(100),
+            relative=1 - Decimal(percentage) / 100,
             reason="late",
             description=description,
         )
 
     @classmethod
     def early_pc(
-        cls, percentage: Numeric, description: str | None = None
+        cls, percentage: Decimal | int | float, description: str | None = None
     ) -> Adjustment:
         """
         Create an adjustment that multiplies the grade by (1 + percentage) with
         reason "early".
         """
         return Adjustment(
-            relative=1 + Decimal(percentage) / Decimal(100),
+            relative=1 + Decimal(percentage) / 100,
             reason="early",
             description=description,
         )
 
-    @property
-    def method(
-        self,
-    ) -> Literal["relative", "absolute", "overriden", "comment", "affine"]:
+    @classmethod
+    def deserialize(cls, src: str) -> Adjustment:
         """
-        The method used for this adjustment.
-
-        Comment is a special case of relative adjustment with relative=1 and
-        absolute=0.
+        Deserialize a string representation of an adjustment back into an
+        Adjustment object.
         """
-        if self.override is not None:
-            return "overriden"
-        if self.relative == 1 and self.absolute == 0:
-            return "comment"
-        elif self.relative != 1:
-            return "relative"
-        elif self.relative == 1:
-            return "absolute"
-        else:
-            return "affine"
+        adj, _ = parse(src, _parse_x=True)
+        return adj
 
     @overload
     def __init__(self, value: Numeric | str, /) -> None: ...
@@ -139,7 +147,7 @@ class Adjustment:
         self,
         *,
         relative: Numeric = 1,
-        reason: AdjustmentReason = None,
+        reason: AdjustmentReason | None = None,
         description: str | None = None,
     ) -> None: ...
 
@@ -148,7 +156,7 @@ class Adjustment:
         self,
         *,
         absolute: Numeric = 0,
-        reason: AdjustmentReason = None,
+        reason: AdjustmentReason | None = None,
         description: str | None = None,
     ) -> None: ...
 
@@ -157,7 +165,7 @@ class Adjustment:
         self,
         *,
         override: Numeric,
-        reason: AdjustmentReason = None,
+        reason: AdjustmentReason | None = None,
         description: str | None = None,
     ) -> None: ...
 
@@ -168,10 +176,10 @@ class Adjustment:
         relative: Numeric = 1,
         absolute: Numeric = 0,
         override: Numeric | None = None,
-        reason: AdjustmentReason = None,
+        reason: AdjustmentReason | None = None,
         description: str | None = None,
     ) -> None:
-        self._reason: AdjustmentReason = reason
+        self._reason: AdjustmentReason | None = reason
         self._description = description
         self._override = None
         if isinstance(value, str) and value.endswith("%"):
@@ -184,10 +192,10 @@ class Adjustment:
         elif override is not None:
             self._relative = Decimal(1)
             self._absolute = Decimal(0)
-            self._override = Decimal(override)
+            self._override = to_decimal(override)
         else:
-            self._relative = Decimal(relative)
-            self._absolute = Decimal(absolute)
+            self._relative = to_decimal(relative)
+            self._absolute = to_decimal(absolute)
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Adjustment):
@@ -212,6 +220,9 @@ class Adjustment:
         elif self.absolute != 0:
             args.append(f"absolute={self.absolute}")
         return f"Adjustment({', '.join(args)})"
+
+    def __str__(self) -> str:
+        return self._represent_with_value("x")
 
     def __rshift__(self, other: Adjustment) -> Adjustment:
         if not isinstance(other, Adjustment):
@@ -248,7 +259,7 @@ class Adjustment:
 
                 new = Adjustment(
                     absolute=0,
-                    reason=opt.coalesce(self.reason, other.reason),
+                    reason=opt.coalesce(self.reason, other.reason),  # pyright: ignore[reportArgumentType]
                     description=opt.coalesce(self.description, other.description),
                 )
                 new._relative = a * aa
@@ -258,25 +269,32 @@ class Adjustment:
     def __hash__(self) -> int:
         return hash((self.relative, self.absolute, self.override, self.reason))
 
-    def apply(self, grade: Numeric) -> Decimal:
+    def __call__(self, grade: Numeric) -> Numeric:
+        return self.apply(grade)
+
+    def apply(self, grade: Numeric) -> Numeric:
         """
         Apply this adjustment to the given grade and return the result.
         """
         if self.override is not None:
             return self.override
-        return Decimal(grade) * self.relative + self.absolute
+        return add(mul(grade, self.relative), self.absolute)
 
     def represent(self, value: Numeric) -> str:
         """
         Return a string representation of this adjustment when applied to the
         given grade.
         """
+        return self._represent_with_value(value)
+
+    def _represent_with_value(self, value: Numeric | str) -> str:
+        # We separate those two cases to implement __str__
 
         data = ""
         if self.reason is not None:
             data += f"{self.reason}: "
 
-        source = to_decimal(value)
+        source = "x" if value == "x" else to_decimal(value)
         match self.method:
             case "comment":
                 data += str(source)
@@ -311,6 +329,12 @@ class Adjustment:
         new._description = description
         return new
 
+    def serialize(self) -> str:
+        """
+        Serialize this adjustment to a string.
+        """
+        return str(self)
+
 
 def is_valid_reason(src: str) -> TypeGuard[AdjustmentReason]:
     """
@@ -319,29 +343,28 @@ def is_valid_reason(src: str) -> TypeGuard[AdjustmentReason]:
     return src in get_args(AdjustmentReason)
 
 
-def apply_chain(grade: Numeric, adjustments: Iterable[Adjustment]) -> Decimal:
+def apply_chain(grade: Numeric, adjustments: Iterable[Adjustment]) -> Numeric:
     """
     Apply a chain of adjustments to the given grade and return the result.
     """
-    grade = Decimal(grade)
     for adj in adjustments:
         grade = adj.apply(grade)
     return grade
 
 
-def parse(src: str) -> tuple[Adjustment, Decimal]:
+def parse(src: str, *, _parse_x: bool = False) -> tuple[Adjustment, Decimal]:
     """
     Parse a string that could be produced from Adjustment.represent() back into
     an Adjustment and the original grade.
     """
 
-    parsed = read(src)
+    parsed = read(src, _parse_x=_parse_x)
     if parsed.remaining:
         raise ValueError(f"Unexpected adjustment string: {src!r}")
     return parsed.value
 
 
-def read(src: str) -> Parsed[tuple[Adjustment, Decimal]]:
+def read(src: str, *, _parse_x: bool = False) -> Parsed[tuple[Adjustment, Decimal]]:
     """
     Read an adjustment from a string representation.
 
@@ -349,45 +372,49 @@ def read(src: str) -> Parsed[tuple[Adjustment, Decimal]]:
     as a Decimal or raise ValueError if the string is not a valid adjustment
     representation.
     """
-    rest = src.lstrip()
+    unread = src.lstrip()
     reason: AdjustmentReason | None = None
     description: str | None = None
 
-    if m := REASON.match(rest):
+    if m := REASON.match(unread):
         if not is_valid_reason(m.group(1)):
             raise ValueError(f"Invalid adjustment reason: {m.group(1)!r}")
         reason = cast(AdjustmentReason, m.group(1))
-        rest = rest[m.end() :]
+        unread = unread[m.end() :]
 
-    rest, number = read_number(rest)
-    rest = rest.lstrip()
+    if _parse_x and unread.startswith("x"):
+        unread = unread[1:].lstrip()
+        number = Decimal(0)
+    else:
+        unread, number = read_number(unread)
+    unread = unread.lstrip()
 
-    if rest.startswith("+"):
-        rest, value = read_number(rest[1:])
-        if rest.startswith("%"):
-            rest = rest[1:]
+    if unread.startswith("+"):
+        unread, value = read_number(unread[1:])
+        if unread.startswith("%"):
+            unread = unread[1:]
             value = value / 100 + 1
             adj = Adjustment(relative=value, reason=reason, description=description)
         else:
             adj = Adjustment(absolute=value, reason=reason, description=description)
 
-    elif rest.startswith("-"):
-        rest, value = read_number(rest[1:])
-        if rest.startswith("%"):
-            rest = rest[1:]
+    elif unread.startswith("-"):
+        unread, value = read_number(unread[1:])
+        if unread.startswith("%"):
+            unread = unread[1:]
             value = 1 - value / 100
             adj = Adjustment(relative=value, reason=reason, description=description)
         else:
             adj = Adjustment(absolute=-value, reason=reason, description=description)
 
-    elif rest.startswith("=>"):
-        rest, value = read_number(rest[2:])
+    elif unread.startswith("=>"):
+        unread, value = read_number(unread[2:])
         adj = Adjustment(override=value, reason=reason, description=description)
     else:
-        raise ValueError(f"Invalid adjustment format: {src.removesuffix(rest)!r}...")
+        raise ValueError(f"Invalid adjustment format: {src.removesuffix(unread)!r}...")
 
-    if rest.startswith("("):
-        rest, description = read_parens(rest)
+    if unread.startswith("("):
+        unread, description = read_parens(unread)
         adj = adj.describe(description)
 
-    return Parsed(rest, (adj, number))
+    return Parsed(unread, (adj, number))

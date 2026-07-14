@@ -70,8 +70,8 @@ Validate the roster data for consistency and completeness.
 `--fields FIELD1,FIELD2,...`
 :   Check for missing required fields.
 
-`--assignment ASSIGNMENT_ID`
-:   Validate that all students have submissions for the specified assignment.
+`--quiz ASSIGNMENT_ID`
+:   Validate that all students have submissions for the specified quiz.
 
 `--yes/--no`
 :   Automatically answer yes or no to all prompts during validation.

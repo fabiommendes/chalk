@@ -1,16 +1,16 @@
-# chalk-assignment(1)
+# chalk-quiz(1)
 
 ## NAME
 
-chalk-assignment - manage assignment resources
+chalk-quiz - manage quiz resources
 
 ## SYNOPSIS
 
-chalk assignment <subcommand> <args> <options>
+chalk quiz <subcommand> <args> <options>
 
 ## DESCRIPTION
 
-Creates, lists, inspects, deletes, and converts assignment files.
+Creates, lists, inspects, deletes, and converts quiz files.
 
 ## SUBCOMMANDS
 
@@ -20,55 +20,55 @@ Creates, lists, inspects, deletes, and converts assignment files.
 
 ## OPTIONS
 
-### chalk assignment list
+### chalk quiz list
 
 `-s, --sort FIELD`
-:   Sort assignments by the specified field. Prefix with `-` for descending order.
+:   Sort quizzes by the specified field. Prefix with `-` for descending order.
 
 
-### chalk assignment create ID
+### chalk quiz create ID
 
 `-n, --name TEXT`
-:  Specify a name for the assignment. By default it uses the ID as the name.
+:  Specify a name for the quiz. By default it uses the ID as the name.
 
 `-q, --questions INT`
-:  Create the specified number of empty questions in the assignment.
+:  Create the specified number of empty questions in the quiz.
 
 `--start DATETIME`
-:  Specify the start date and time for the assignment.
+:  Specify the start date and time for the quiz.
 
 `--end DATETIME`
-:  Specify the end date and time for the assignment.
+:  Specify the end date and time for the quiz.
 
 `--split`
-:  Split the assignment into separate files.
+:  Split the quiz into separate files.
 
 
-### chalk assignment show ASSIGNMENT
+### chalk quiz show ASSIGNMENT
 
 `-g, --grades`
 :  Show a table with all grades for all students.
 
 `-m, --missing`
-:  Show a list of students who have not submitted the assignment.
+:  Show a list of students who have not submitted the quiz.
 
 
-### chalk assignment merge ID1 ID2
+### chalk quiz merge ID1 ID2
 
 `-o, --output ID`
-:  Specify the output id for the merged assignment file(s).
+:  Specify the output id for the merged quiz file(s).
 
 ## EXAMPLES
 
 ```bash
-# List assignments sorted by name in descending order
-chalk assignment list --sort -name
+# List quizzes sorted by name in descending order
+chalk quiz list --sort -name
 
-# Create a new assignment with 10 questions using YAML format
-chalk assignment create exam-01 --questions 10 --format yaml
+# Create a new quiz with 10 questions using YAML format
+chalk quiz create exam-01 --questions 10 --format yaml
 
-# Show details of an assignment including questions
-chalk assignment show exam-01 --questions
+# Show details of a quiz including questions
+chalk quiz show exam-01 --questions
 ```
 
 ## SEE ALSO

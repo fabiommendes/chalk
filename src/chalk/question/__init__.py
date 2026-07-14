@@ -1,39 +1,131 @@
-from typing import Annotated, Any
+from __future__ import annotations
 
-from pydantic import Field, RootModel
+from typing import TYPE_CHECKING, Any, Literal, TypeIs, assert_never
 
-from .associative import Association
+from rich.console import Group, RenderableType
+from rich.text import Text
+
+if TYPE_CHECKING:
+    from chalk.core import Quiz, models
+
+from ..core.answer import AnyAnswer
+from ..core.answer import serialize_answer as _serialize_answer
+from .association import Association
 from .base import Generic
 from .fillin import FillIn
 from .multiple_choice import MultipleChoice
 from .multiple_selection import MultipleSelection
+from .repo import Repo
 from .textual import Textual
-from .util import question_id
 
 __all__ = (
     "Question",
-    "validate_question",
     "Association",
     "Generic",
     "FillIn",
     "MultipleChoice",
     "MultipleSelection",
     "Textual",
-    "question_id",
 )
 
-type Question = Annotated[
-    Textual | Generic | MultipleChoice | MultipleSelection | Association | FillIn,
-    Field(discriminator="type"),
-]
+Question = Generic | Textual | MultipleChoice | MultipleSelection | Association | FillIn | Repo
 
 
-class QuestionRoot(RootModel[Question]):
-    root: Question
-
-
-def validate_question(data: Any) -> Question:
+def load_question(id: models.QuestionId, conf: models.Question, /, quiz: Quiz) -> Question:
     """
-    Convert raw data into a validated Question object.
+    Load a question from its configuration model.
     """
-    return QuestionRoot.model_validate(data).root
+    match conf.type:
+        case None:
+            return Generic(id, conf, quiz=quiz)
+        case "textual":
+            return Textual(id, conf, quiz=quiz)
+        case "multiple-choice":
+            return MultipleChoice(id, conf, quiz=quiz)
+        case "multiple-selection":
+            return MultipleSelection(id, conf, quiz=quiz)
+        case "association":
+            return Association(id, conf, quiz=quiz)
+        case "fill-in":
+            return FillIn(id, conf, quiz=quiz)
+        case "text":
+            return Textual(id, conf, quiz=quiz)
+        case "repo":
+            return Repo(id, conf, quiz=quiz)
+        case other:
+            assert_never(other)
+    raise ValueError(f"Unknown question type: {conf.type}")
+
+
+def is_question(data: Any) -> TypeIs[Question]:
+    """
+    Check if the given data is a valid Question object.
+    """
+    return isinstance(data, Question)
+
+
+def render_answer(
+    question: Question, answer: AnyAnswer | None, /, *, plain: bool = False
+) -> RenderableType:
+    """
+    Render the given answer for the specified question.
+    """
+    if answer is None:
+        return Text("No answer provided", style="dim")
+    try:
+        validated: Any = question.validate_answer(answer)
+        return question.render_answer(validated, plain=plain)
+    except ValueError as e:
+        return Group(Text("Invalid answer", style="bold red"), str(e))
+
+
+def serialize_answer(
+    question: Question,
+    answer: AnyAnswer | None,
+    /,
+    *,
+    error: Literal["raise", "ignore"] = "raise",
+) -> str:
+    """
+    Serialize the given answer for the specified question.
+    """
+    if answer is None:
+        return ""
+
+    try:
+        validated: Any = question.validate_answer(answer)
+        return question.serialize_answer(validated)
+    except ValueError:
+        if error == "raise":
+            raise
+        elif error == "ignore":
+            return _serialize_answer(answer)
+        else:
+            raise ValueError(f"Invalid error handling option: {error}")
+
+
+def persist_answer(
+    question: Question,
+    student_id: str,
+    answer: AnyAnswer | None,
+    /,
+    *,
+    error: Literal["raise", "ignore"] = "raise",
+    overwrite: bool = False,
+) -> None:
+    """
+    Persist the given answer for the specified question and student.
+    """
+    if answer is None:
+        return
+
+    data = serialize_answer(question, answer, error=error)  # Validate the answer before persisting
+    ext = question.get_answer_extension() or "txt"
+    path = question.root / "responses" / f"{student_id}.{ext}"  # Persist the serialized answer
+
+    if path.exists() and not overwrite:
+        if error == "raise":
+            raise FileExistsError(f"Answer file already exists: {path}")
+        return
+
+    path.write_text(data, encoding="utf-8")

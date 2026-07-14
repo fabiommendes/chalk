@@ -2,29 +2,27 @@ import datetime
 import sys
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Iterable, Literal
+from typing import Annotated, Iterable
 
 import opt
 import rich
 import typer
 
-from ..conf import find_project_root
-from ..core import Grade, question
-from ..core.assignment import Assignment, iter_assignments
+from ..core import Classroom, Grade, Quiz, models
+from ..core.decimal import as_chalk_decimal, render_decimal
 from ..env import ask_optional_string
 from ..table import Table, validate_table_format
-from ..util.decimal import format_decimal, normalize_decimal
 from .util import safe
 
 app = typer.Typer(help="Manage the student roster.", no_args_is_help=True)
 
 
 # ==============================================================================
-# chalk assignment list
+# chalk quiz list
 # ==============================================================================
 @app.command(name="list")
 @safe
-def list_assignments(
+def list_quizzes(
     sort: Annotated[
         str,
         typer.Option(
@@ -37,58 +35,50 @@ def list_assignments(
     ] = "id",
 ) -> None:
     """
-    Show the current list of assignments.
+    Show the current list of quizzes.
     """
 
     if sort is not None and sort not in {"id", "name", "start", "end"}:
         rich.print(f"[b red]Invalid sort column: {sort}[/]", file=sys.stderr)
         raise typer.Exit(1)
 
+    cfg = Classroom.load()
     rows = []
     ids: list[str] = []
 
-    for id, loader in iter_assignments():
-        try:
-            assignment = loader()
-        except Exception as e:
-            rich.print(
-                f"[b red]Error loading assignment {id}:[/]\n  [red]{e}[/]",
-                file=sys.stderr,
-            )
-            continue
-
+    for quiz in cfg.iter_quizzes():
         cells = {
-            "name": assignment.name,
-            "start": assignment.start,
-            "end": assignment.end,
+            "name": quiz.name,
+            "start": quiz.start,
+            "end": quiz.end,
         }
 
-        ids.append(id)
+        ids.append(quiz.id)
         rows.append(cells)
 
     if not ids:
-        rich.print("No assignment found!")
+        rich.print("No quiz found!")
         return
 
     table = Table(rows, index=ids)
     table = table.select_columns(["name", "start", "end"])
-    table.render(
+    table.print(
         sort=sort,
         styles={"id": "bold yellow"},
     )
 
 
 # ==============================================================================
-# chalk assignment create ID
+# chalk quiz create ID
 # ==============================================================================
 @app.command(name="create")
 @safe
 def create(
-    assignment_id: Annotated[
+    quiz_id: Annotated[
         str,
         typer.Argument(
             ...,
-            help="Assignment identifier (e.g. 'hw1', 'exam1', etc.)",
+            help="Quiz identifier (e.g. 'hw1', 'exam1', etc.)",
         ),
     ],
     name: Annotated[
@@ -97,10 +87,10 @@ def create(
             ...,
             "-n",
             "--name",
-            help="Assignment name",
+            help="Quiz name",
         ),
     ] = None,
-    questions: Annotated[
+    question_ids: Annotated[
         list[str] | None,
         typer.Option(
             ...,
@@ -114,7 +104,7 @@ def create(
         typer.Option(
             ...,
             "--start",
-            help="Start date and time for the assignment (e.g. '2024-01-01 09:00')",
+            help="Start date and time for the quiz (e.g. '2024-01-01 09:00')",
         ),
     ] = None,
     end: Annotated[
@@ -122,76 +112,59 @@ def create(
         typer.Option(
             ...,
             "--end",
-            help="End date and time for the assignment (e.g. '2024-01-01 17:00')",
+            help="End date and time for the quiz (e.g. '2024-01-01 17:00')",
         ),
     ] = None,
-    split: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            "--split",
-            help="Split the assignment into separate files (assignment.yaml, questions/, etc.)",
-        ),
-    ] = False,
-    format: Annotated[
-        Literal["csv", "json", "yaml", "xlsx"],
-        typer.Option(
-            ...,
-            "--format",
-            "-f",
-            help="File format to save assignment in (csv, json, yaml, xlsx)",
-        ),
-    ] = "csv",
 ) -> None:
     """
-    Create a new assignment.
+    Create a new quiz.
     """
 
-    for id, loader in iter_assignments():
-        if id == assignment_id:
-            rich.print("[b red]Assignment already exists[/]", file=sys.stderr)
+    cls = Classroom.load()
+
+    for quiz in cls.iter_quizzes():
+        if quiz_id == quiz.id:
+            rich.print("[b red]Quiz already exists[/]", file=sys.stderr)
             raise SystemExit(1)
 
-        path = find_project_root() / "assignments" / f"{assignment_id}.{format}"
-        if questions:
-            if len(questions) == 1 and questions[0].isdigit():
-                questions = [f"q{i + 1}" for i in range(int(questions[0]))]
-            else:
-                questions = [q.strip() for q in questions]
+    quiz_root = cls.root / quiz_id
+    path = quiz_root / "conf.toml"
 
-        assignment = Assignment(
-            id=assignment_id,
-            path=path,
-            start=start,
-            end=end,
-            name=ask_optional_string(
-                "Name",
-                name,
-                default=assignment_id,
-            ),
-            submissions={},
-            questions={
-                id: question.Generic(id=id, grade=Decimal(1)) for id in questions
-            }
-            if questions
-            else None,
-        )
+    if question_ids:
+        if len(question_ids) == 1 and question_ids[0].isdigit():
+            question_ids = [f"q{i + 1}" for i in range(int(question_ids[0]))]
+        else:
+            question_ids = [q.strip() for q in question_ids]
 
-        assignment.save(split=split)
-        rich.print(assignment)
+    conf = models.Quiz(
+        start=start,
+        end=end,
+        name=ask_optional_string(
+            "Name",
+            name,
+            default=quiz_id,
+        ),
+        questions=question_ids
+        if question_ids is None
+        else [models.GenericQuestion(id=id) for id in question_ids],
+    )
+
+    quiz = Quiz(quiz_id, conf, cls)
+    quiz.save()
+    rich.print(quiz)
 
 
 # ==============================================================================
-# chalk assignment show ID
+# chalk quiz show ID
 # ==============================================================================
 @app.command(name="show")
 @safe
 def show(
-    assignment_id: Annotated[
+    quiz_id: Annotated[
         str | None,
         typer.Argument(
             ...,
-            help="Assignment identifier (e.g. 'hw1', 'exam1', etc.)",
+            help="Quiz identifier (e.g. 'hw1', 'exam1', etc.)",
         ),
     ] = None,
     grades: Annotated[
@@ -200,7 +173,7 @@ def show(
             ...,
             "-g",
             "--grades",
-            help="Show all grades for the assignment.",
+            help="Show all grades for the quiz.",
         ),
     ] = False,
     missing: Annotated[
@@ -209,7 +182,7 @@ def show(
             ...,
             "-m",
             "--missing",
-            help="Show which students have not submitted the assignment.",
+            help="Show which students have not submitted the quiz.",
         ),
     ] = False,
     sort: Annotated[
@@ -244,17 +217,18 @@ def show(
     ] = None,
 ) -> None:
     """
-    Show details of an assignment.
+    Show details of a quiz.
     """
-    assignment = Assignment.prompt(assignment_id)
+    cfg = Classroom.load()
+    quiz = cfg.prompt_quiz(quiz_id)
 
     if not missing and not grades:
-        assignment.dump(
+        quiz.dump(
             output_path,
             format=opt.map(validate_table_format, output_format),
         )
     elif grades:
-        table = assignment.get_grades(total="total")
+        table = Table.from_dataframe(quiz.grades.get_dataframe(total="total"))
         table.dump(
             output_path,
             format=opt.map(validate_table_format, output_format),
@@ -270,7 +244,7 @@ def show(
 
 
 # ==============================================================================
-# chalk assignment merge ID1 ID2
+# chalk quiz merge ID1 ID2
 # ==============================================================================
 @app.command(name="merge")
 @safe
@@ -279,14 +253,14 @@ def merge(
         str,
         typer.Argument(
             ...,
-            help="ID of the first assignment to merge",
+            help="ID of the first quiz to merge",
         ),
     ],
     id2: Annotated[
         str,
         typer.Argument(
             ...,
-            help="ID of the second assignment to merge",
+            help="ID of the second quiz to merge",
         ),
     ],
     output_id: Annotated[
@@ -295,24 +269,25 @@ def merge(
             ...,
             "-o",
             "--output",
-            help="ID for the merged assignment (defaults to ID1)",
+            help="ID for the merged quiz (defaults to ID1)",
         ),
     ] = None,
 ) -> None:
     """
-    Merge two assignments into a single assignment file.
+    Merge two quizzes into a single quiz file.
 
     This is useful for merging changes from different branches or collaborators.
     """
-    assignment1 = Assignment.prompt(id1)
-    assignment2 = Assignment.prompt(id2)
+    cfg = Classroom.load()
+    quiz1 = cfg.prompt_quiz(id1)
+    quiz2 = cfg.prompt_quiz(id2)
 
     if output_id is None:
         output_id = id1 + "-merged"
 
-    msg = f"Merging assignments '{assignment1.name}' and '{assignment2.name}' into '{output_id}'..."
+    msg = f"Merging quizzes '{quiz1.name}' and '{quiz2.name}' into '{output_id}'..."
     print(msg)
-    raise NotImplementedError("Assignment merging is not yet implemented")
+    raise NotImplementedError("Quiz merging is not yet implemented")
 
 
 #
@@ -320,7 +295,7 @@ def merge(
 #
 def render_mean(data: Iterable[Decimal | Grade | None]) -> str | None:
     filtered = opt.filter(data)
-    numbers = list(map(normalize_decimal, filtered))  # type: ignore
+    numbers = list(map(as_chalk_decimal, filtered))  # type: ignore
     if (n := len(numbers)) == 0:
         return None
-    return format_decimal(sum(numbers, Decimal(0)) / n)
+    return render_decimal(sum(numbers, Decimal(0)) / n)

@@ -11,12 +11,14 @@ class Repo:
     """
 
     def __init__(self, base: Path, /) -> None:
-        self.base = base
+        self.root = base
         self._written_files: set[Path] = set()
+        self._preserve: set[Path] = set()
 
-    def copy_source(self, source: Path, link: bool = False) -> None:
+    def copy_tree(self, source: Path, link: bool = False) -> None:
         """
-        Copy the given source file to the destination directory, and keep track of the copied file for later cleanup.
+        Copy the given source file to the destination directory, and keep track
+        of the copied file for later cleanup.
         """
         if not source.exists() or not source.is_dir():
             msg = f"Source path {source} does not exist or is not a directory."
@@ -25,7 +27,7 @@ class Repo:
         for base, _, filenames in source.walk():
             for filename in filenames:
                 source_file = base / filename
-                dest_file = self.base / source_file.relative_to(source)
+                dest_file = self.root / source_file.relative_to(source)
                 dest_file.parent.mkdir(parents=True, exist_ok=True)
 
                 if source_file.is_dir():
@@ -37,12 +39,17 @@ class Repo:
 
                 self._written_files.add(dest_file)
 
-    def write_file(self, relative_path: Path | str, content: str | bytes) -> None:
+    def write_file(
+        self,
+        relative_path: Path | str,
+        content: str | bytes,
+        preserve: bool = False,
+    ) -> None:
         """
         Write the given content to a file at the specified relative path within
         the destination directory.
         """
-        full_path = self.base / relative_path
+        full_path = self.root / relative_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         if isinstance(content, str):
@@ -50,7 +57,10 @@ class Repo:
         else:
             full_path.write_bytes(content)
 
-        self._written_files.add(full_path)
+        if preserve:
+            self._preserve.add(full_path)
+        else:
+            self._written_files.add(full_path)
 
     def force_remove(self, relative_path: Path | str) -> None:
         """
@@ -58,7 +68,7 @@ class Repo:
         even if it was not created by this FileWriter.
         """
         path = Path(relative_path)
-        full_path = self.base / path
+        full_path = self.root / path
         self._written_files.discard(full_path)
 
         if full_path.exists():
@@ -75,7 +85,7 @@ class Repo:
         If force is True, also remove any files created outside of the
         FileWriter's control (e.g. files that were copied but not tracked).
         """
-        remove_dirs = {self.base}
+        remove_dirs = {self.root}
         while self._written_files:
             file = self._written_files.pop()
             if file.exists():
@@ -84,7 +94,7 @@ class Repo:
                 else:
                     file.unlink()
                     parent = file.parent
-                    while parent != self.base:
+                    while parent != self.root:
                         remove_dirs.add(parent)
                         parent = parent.parent
 
@@ -98,4 +108,4 @@ class Repo:
         """
         Remove repository from filesystem.
         """
-        shutil.rmtree(self.base, ignore_errors=True)
+        shutil.rmtree(self.root, ignore_errors=True)

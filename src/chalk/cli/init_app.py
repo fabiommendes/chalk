@@ -6,16 +6,16 @@ import rich
 import typer
 
 from .. import assets, env
-from ..conf import is_project_root
+from ..core.classroom import is_project_root
 from .util import safe
 
-__all__ = ["app", "init"]
+__all__ = ["init", "add_init_command"]
 
 
-app = typer.Typer(name="chalk-init", no_args_is_help=True, add_help_option=True)
+def add_init_command(app: typer.Typer) -> None:
+    app.command(no_args_is_help=False)(init)
 
 
-@app.command()
 @safe
 def init(
     classroom: Annotated[
@@ -54,9 +54,7 @@ def init(
     (base / "chalk.toml").write_text(chalk_toml)
     if not (roster := base / "roster.csv").exists():
         roster.write_text("id,name")
-    if not (assignments := base / "assignments").exists():
-        assignments.mkdir()
-    if not (reports := base / "reports").exists():
-        reports.mkdir()
-    if not (scripts := base / "scripts").exists():
-        scripts.mkdir()
+
+    for dir in ["reports", "data", "scripts"]:
+        if not (path := base / dir).exists():
+            path.mkdir()

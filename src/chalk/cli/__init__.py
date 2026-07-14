@@ -1,15 +1,21 @@
 import builtins
+import inspect
 from typing import Any
 
+import opt
 import rich
 import typer
 
 from . import (
-    assignment_app,
     autograde_app,
+    clear_app,
+    contrib_app,
+    grades_app,
     info_app,
     init_app,
+    plagiarism_app,
     question_app,
+    quiz_app,
     response_app,
     roster_app,
 )
@@ -17,6 +23,8 @@ from . import report as report_app
 
 app = typer.Typer(name="Chalk", no_args_is_help=True, add_help_option=True)
 
+
+NOT_GIVEN = object()
 ADD_STUDENT_OPTIONS = {"email", "github", "name", "force"}
 ADD_SIMPLE_ASSIGNMENT_OPTIONS = {
     "name",
@@ -28,42 +36,42 @@ ADD_SIMPLE_ASSIGNMENT_OPTIONS = {
     "force",
 }
 
-app.add_typer(
-    init_app.app,
-    name="init",
-    help="Initialize a new Chalk project.",
-)
+init_app.add_init_command(app)
 app.add_typer(
     roster_app.app,
     name="roster",
     help="Manage the student roster.",
 )
 app.add_typer(
-    assignment_app.app,
-    name="assignment",
-    help="Manage assignments.",
+    quiz_app.app,
+    name="quiz",
+    help="Manage quizzes.",
 )
 app.add_typer(
     question_app.app,
     name="question",
-    help="Manage questions for assignments.",
+    help="Manage questions for quizzes.",
 )
 app.add_typer(
     response_app.app,
     name="response",
     help="Manage responses for questions.",
 )
-app.add_typer(
-    autograde_app.app,
-    name="autograde",
-    help="Manage autograder scripts and run autograding.",
-)
+autograde_app.add_autograde_command(app)
 app.add_typer(
     report_app.app,
     name="report",
-    help="Generate reports for assignments and students.",
+    help="Generate reports for quizzes and students.",
+)
+app.add_typer(
+    plagiarism_app.app,
+    name="plagiarism",
+    help="Manage plagiarism detection and reports.",
 )
 info_app.add_info_command(app)
+contrib_app.add_contrib_command(app)
+clear_app.add_clear_command(app)
+grades_app.add_grades_command(app)
 
 
 def main() -> None:
@@ -77,7 +85,17 @@ def _add_debug_builtins() -> None:
     debug information without needing to import anything.
     """
 
-    def dbg(obj_or_name: Any, /, *args: Any, deep: bool = False) -> None:
+    def dbg(obj_or_name: Any = NOT_GIVEN, /, *args: Any, deep: bool = False) -> None:
+        if obj_or_name is NOT_GIVEN:
+            frame = inspect.currentframe()
+            frame = opt.map(lambda x: x.f_back, frame)
+            if frame is None:
+                rich.print("[red on white]dbg() called outside of a frame[/]")
+                return
+
+            rich.print(frame.f_locals)
+            return
+
         if args:
             rich.print(f"[red on white]{obj_or_name}[/]", end="")
         else:

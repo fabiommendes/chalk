@@ -10,7 +10,7 @@ chalk <global-options> <command> <args> <options>
 
 ## DESCRIPTION
 
-chalk manages local classroom data such as roster, assignments, responses, grades, and reports.
+chalk manages local classroom data such as roster, quizzes, responses, grades, and reports.
 
 ## OPTIONS
 
@@ -25,7 +25,7 @@ chalk manages local classroom data such as roster, assignments, responses, grade
 - init
 - info
 - roster
-- assignment
+- quiz
 - question
 - response
 - grade
@@ -37,7 +37,7 @@ chalk manages local classroom data such as roster, assignments, responses, grade
 ```bash
 chalk init --classroom calc1 --teacher "Dr. Ada"
 chalk roster import --file roster.csv
-chalk assignment create exam-01 --questions 10
+chalk quiz create exam-01 --questions 10
 ```
 
 ## EXIT STATUS
@@ -49,6 +49,6 @@ chalk assignment create exam-01 --questions 10
 
 - chalk-init(1)
 - chalk-roster(1)
-- chalk-assignment(1)
+- chalk-quiz(1)
 - chalk-grade(1)
 - chalk-report(1)

@@ -2,7 +2,7 @@
 
 ## NAME
 
-chalk-question - inspect and transform assignment questions
+chalk-question - inspect and transform quiz questions
 
 ## SYNOPSIS
 
@@ -59,16 +59,16 @@ Lists questions, inspects one question, extracts choices, and converts question 
 ## EXAMPLES
 
 ```bash
-# List all questions in the assignment "exam-01"
+# List all questions in the quiz "exam-01"
 chalk question list exam-01
 
-# Show details of question "q1" in assignment "exam-01" with statistics
+# Show details of question "q1" in quiz "exam-01" with statistics
 chalk question show exam-01 q1 --with-stats
 
-# Extract choices for question "q2" in assignment "exam-01"
+# Extract choices for question "q2" in quiz "exam-01"
 chalk question choices exam-01 q2
 
-# Convert question "q3" in assignment "exam-01" to numeric type
+# Convert question "q3" in quiz "exam-01" to numeric type
 chalk question convert exam-01 q3 --to numeric
 ```
 
@@ -80,4 +80,4 @@ chalk question convert exam-01 q3 --to numeric
 ## SEE ALSO
 
 - chalk(1)
-- chalk-assignment(1)
+- chalk-quiz(1)

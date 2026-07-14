@@ -1,16 +1,12 @@
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from decimal import Decimal
 from logging import getLogger
 from pathlib import Path
 from typing import Any, Callable
 
-import opt
-
-from ..core import AssignmentId, QuestionId, StudentId
-from ..core.grader import Graded, Grader
-from ..util.path import get_path_from_names
-from .conf import AutograderConf
+from ..core import Question, StudentId, models
+from ..core.grader import DEFAULT_TIMEOUT, Graded, Grader
 from .repo import Repo
 from .script_runner import ChalkEnv, ScriptRunner
 
@@ -20,76 +16,71 @@ log = getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class ScriptGrader(Grader[str]):
+class ScriptGrader(Grader[str | Path]):
     """
     Grades based on a regular expression.
 
     The answer is considered correct if it matches the regex.
     """
 
-    root: Path
     script: Path
-    question_id: QuestionId
-    assignment_id: AssignmentId
-    grade: Decimal
-    validator: Callable[[str], bool] | None = None
-    template_repo: Path | None = NOT_GIVEN
-    conf: AutograderConf = NOT_GIVEN
-    keep_files: bool = False
-    debug: bool = False
-
-    def __post_init__(self) -> None:
-        if self.conf is NOT_GIVEN:
-            conf = AutograderConf.from_root_path(self.root) or AutograderConf()
-            object.__setattr__(self, "conf", conf)
-
-        if self.template_repo is NOT_GIVEN:
-            template_repo = get_path_from_names(
-                self.root,
-                ("_template", "autograde.template", "_autograde.template"),
-                accept_dir=True,
-            )
-            object.__setattr__(self, "template_repo", template_repo)
+    question: Question
+    conf: models.Autograder
 
     def __call__(
         self,
         id: StudentId,
-        answer: str,
+        answer: str | Path,
         /,
-        **kwargs: Any,
+        *,
+        debug: bool = False,
+        timeout: float = DEFAULT_TIMEOUT,
+        keep_files: bool = False,
+        keep_failed: bool = False,
+        on_output_line: Callable[[str], None] | None = None,
+        **kwargs,
     ) -> Graded | None:
 
-        with self.student_repository(id, answer) as repo:
+        if isinstance(answer, Path):
+            if not answer.exists():
+                log.warning(f"Answer path {answer} does not exist for student {id}")
+                return None
+            elif answer.is_file():
+                answer = data = answer.read_text()
+            else:
+                data = str(answer)
+        else:
+            data = answer
+
+        with self.student_repository(id, answer, clear=not keep_files and not keep_failed) as repo:
             runner = ScriptRunner(
                 self.script,
                 repo,
                 env=ChalkEnv(
-                    answer=answer,
+                    answer=data,
                     answer_path=str(self._answer_path()),
-                    question_id=self.question_id,
-                    assignment_id=self.assignment_id,
+                    question_id=self.question.id,
+                    quiz_id=self.question.quiz.id,
                     student_id=id,
                 ),
-                timeout=self.conf.timeout,
-                capture_stdout=not self.debug,
+                timeout=timeout,
+                on_output_line=on_output_line,
             )
-
             result = runner.run()
 
-            if result.return_code != 0 and self.debug:
-                msg = f"[red]Autograder failed for student {id} with code {result.return_code}[/red]"
-                log.warning(msg)
-            if result.return_code != 0:
-                return None
-            return Graded(
-                opt.map(lambda x: x * self.grade, result.score),
-                feedback=result.feedback,
-            )
+        if result.return_code != 0 and debug:
+            msg = f"[red]Autograder process  for student {id} with code {result.return_code}[/red]"
+            log.warning(msg)
 
-        raise 1
+        return Graded(
+            result.score,
+            feedback=result.feedback,
+        )
 
     @contextmanager
-    def student_repository(self, student_id: StudentId, answer: str, /) -> Any:
+    def student_repository(
+        self, student_id: StudentId, answer: str | Path, /, clear: bool = True
+    ) -> Any:
         """
         Context manager that creates a isolated student repository within the
         student's submission directories.
@@ -98,31 +89,28 @@ class ScriptGrader(Grader[str]):
         all files in the template repository, if it exists.
         """
         # Create a new repository for student
-        repo_path = self.root / student_id
-        repo_path.mkdir(parents=True, exist_ok=True)
-        repo = Repo(repo_path)
+        tmp_dir = tempfile.TemporaryDirectory(prefix=f"chalk-{student_id}-", delete=clear)
+        repo = Repo(Path(tmp_dir.name))
 
         try:
-            # Copy the template repository
-            if self.template_repo is not None:
-                repo.copy_source(self.template_repo, link=self.conf.prefer_links)
+            if (template := self.question.get_template_path()) is not None:
+                repo.copy_tree(template)
                 log.debug(f"Copied template repository for {student_id}")
 
-            # Copy the answer to the student's repository
-            if answer is None:
-                msg = f"Empty answer for student {student_id}, at {self._assignment_id}/{self._question_id}"
-                raise ValueError(msg)
-            repo.write_file(self._answer_path(), answer)
+            if isinstance(answer, str):
+                repo.write_file(self._answer_path(), answer)
+            elif isinstance(answer, Path) and answer.is_file():
+                repo.write_file(self._answer_path(), answer.read_bytes())
+            else:
+                repo.copy_tree(answer)
+
             log.debug(f"Copied answer for {student_id}")
 
-            # Yield the repository for grading and do cleanup afterwards
             yield repo
         finally:
-            for path in self.conf.clear:
-                repo.force_remove(path)
-
-            if not self.keep_files and self.conf.clear_temporaries:
-                repo.clear_tracked()
+            if clear:
+                repo.clear_all()
+                log.debug(f"Cleared repository for {student_id}")
 
     def _answer_path(self) -> str:
-        return str(self.conf.answer) or "answer.txt"
+        return str(self.conf.answer or "answer.txt")

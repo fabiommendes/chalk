@@ -1,40 +1,37 @@
 import operator
 from collections import defaultdict
 from decimal import Decimal
-from typing import Annotated, Iterable, Literal, Mapping
+from typing import Iterable, Literal, Mapping
 
 import errorz as rz
 import opt
-from pydantic import Field
+from rich.console import RenderableType
 
 from ..core import disqualification as dis
-from ..core.grade import Grade
+from ..core import models
+from ..core.answer import AnyAnswer, MultipleChoiceAnswer
 from ..core.grader import Graded
-from ..core.submission import Response
-from ..types import Answer, StudentId
-from ..util.show import display_field
+from ..core.models import (
+    Choice,
+    ChoiceId,
+    Response,
+    StudentId,
+)
 from .base import (
-    BaseQuestion,
     Issue,
-    empty_issue,
+    empty_result,
     fail,
     validate_type,
 )
 from .choices import (
-    Choice,
-    ChoiceAnswer,
-    HasChoicesMixin,
-    choice_answer_id,
+    ChoiceQuestionBase,
     display_choices,
-    try_choice_answer_id,
 )
+from .renderable import RenderableField
 from .util import merge_errors
 
-zero = Decimal(0)
-one = Decimal(1)
 
-
-class MultipleChoice(HasChoicesMixin, BaseQuestion[ChoiceAnswer]):
+class MultipleChoice(ChoiceQuestionBase[models.MultipleChoice, MultipleChoiceAnswer]):
     """
     A question in which students mark a single answer from a list of options.
 
@@ -42,32 +39,22 @@ class MultipleChoice(HasChoicesMixin, BaseQuestion[ChoiceAnswer]):
     grade associated with the selected choice.
     """
 
-    type: Literal["multiple-choice"] = "multiple-choice"  # pyright: ignore[reportIncompatibleVariableOverride]
-    penalty: Literal["fair", "negative", "half", "third"] | Decimal | None = None
-    choices: Annotated[list[Choice], Field(default_factory=list)]
+    @property
+    def penalty(self) -> Literal["fair", "negative", "half", "third"] | Decimal | None:
+        return self._conf.penalty
 
-    def _get_grading_issues(self) -> Iterable[Issue]:
-        # Must have at least one choice with the maximum grade.
-        grades = [choice.grade for choice in self.choices if choice.grade is not None]
-        if max(grades, default=0) < 1:
-            yield Issue.error(
-                "no-correct-choice",
-                "Multiple choice question has no correct choice.",
-                scopes=["grading"],
-            )
+    def validate_answer(self, answer: AnyAnswer | str) -> MultipleChoiceAnswer:
+        value = validate_type(answer, str)
+        if not value:
+            raise empty_result()
 
-    def validate_answer(self, answer: Answer) -> rz.Result[str, list[Issue]]:
-        if rz.is_err(val := validate_type(answer, str)):
-            return val
-        if not val:
-            return empty_issue()
-        if not any(val == choice.id for choice in self.choices):
-            return fail(
+        if value not in self._choices:
+            raise fail(
                 "invalid-choice",
-                f"Selected choice does not exist: {val!r}.",
+                f"Selected choice does not exist: {value!r}.",
                 scopes=["response"],
             )
-        return val
+        return value
 
     def validate_responses(
         self,
@@ -84,47 +71,54 @@ class MultipleChoice(HasChoicesMixin, BaseQuestion[ChoiceAnswer]):
             {k: rz.err([v]) for k, v in inconsistent_grades.items()},
         )
 
-    def display(self, rich: bool = True) -> None:
-        super().display(rich=rich)
-        display_field("penalty", self.penalty, rich=rich)
-        display_choices(self.choices, rich=rich)
+    def _render_base_fields(self, plain: bool = False) -> Iterable[tuple[str, RenderableField]]:
+        yield from super()._render_base_fields(plain)
+        yield "penalty", str(self.penalty)
+
+    def _render_base_sections(self, plain: bool = False) -> Iterable[RenderableType]:
+        yield from super()._render_base_sections(plain)
+        yield from display_choices(self._choices.values(), plain=plain)
 
     #
     # Grading methods
     #
-
-    def grade_answer(self, answer: ChoiceAnswer) -> Graded | None:
+    def grade_answer(self, id: MultipleChoiceAnswer) -> Graded | None:
         """
         Grade the given answer and return the grade as a decimal between 0 and 1.
 
         This is a helper method that can be used by graders for this question type.
         """
-        id = choice_answer_id(answer)
         choice = self.get_choice(id)
 
         # Disqualify missing choices
         if choice is None:
-            return Graded(Grade(0, disqualify=dis.Invalid()))
-
-        weight = self.grade or one
-        grade = choice.grade or zero
-
-        return Graded(grade * weight)
+            return Graded(dis.InvalidInput())
+        return Graded(choice.value)
 
     #
     # Utility methods
     #
+    def _get_grading_issues(self) -> Iterable[Issue]:
+        # Must have at least one choice with the maximum grade.
+        grades = [choice.value for choice in self._choices.values() if choice.value is not None]
+        if max(grades, default=0) < 1:
+            yield Issue.error(
+                "no-correct-choice",
+                "Multiple choice question has no correct choice.",
+                scopes=["grading"],
+            )
+
     def _infer_choices_from_responses(
-        self, responses: Mapping[StudentId, Response]
-    ) -> tuple[list[Choice], list[Issue]]:
+        self, responses: Mapping[StudentId, models.Response]
+    ) -> tuple[dict[ChoiceId, Choice], list[Issue]]:
         """
         Infer the choices for this question from the given responses.
 
         This is used to provide feedback to instructors when they create or edit questions without explicitly providing choices, but there are already responses with answers that can be used to infer the choices.
         """
-        choice_grades: dict[str, set[Decimal | None]] = defaultdict(set)
+        choice_grades: dict[ChoiceId, set[Decimal | None]] = defaultdict(set)
         for response in responses.values():
-            answer = try_choice_answer_id(response.answer)
+            answer = response.answer
             if answer is not None and answer != "":
                 choice_grades[answer].add(opt.getattr(response.grade, "non_adjusted"))
 
@@ -138,7 +132,7 @@ class MultipleChoice(HasChoicesMixin, BaseQuestion[ChoiceAnswer]):
                 case [single]:
                     grade = single
                     if grade:
-                        grade /= opt.unwrap(self.grade, one)
+                        grade /= self.value
                 case _:
                     grade = None
                     issues.append(
@@ -152,7 +146,7 @@ class MultipleChoice(HasChoicesMixin, BaseQuestion[ChoiceAnswer]):
         return choices, issues
 
     def _find_inconsistent_grades(
-        self, responses: Mapping[StudentId, Response]
+        self, responses: Mapping[StudentId, models.Response]
     ) -> dict[StudentId, Issue]:
         """
         Check for inconsistent grading issues in the given responses.

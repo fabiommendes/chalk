@@ -1,17 +1,18 @@
-from typing import Any, Literal
+from typing import cast
 
-import errorz as rz
-
-from ..core.grader import Grader
-from ..types import Answer
-from .base import BaseQuestion, Issue
+from ..core import models
+from ..core.answer import AnyAnswer, FillInAnswer
+from .base import BaseQuestion, type_error
 
 
-class FillIn(BaseQuestion[list[str]]):
-    type: Literal["fill-in"] = "fill-in"  # pyright: ignore[reportIncompatibleVariableOverride]
+class FillIn(BaseQuestion[models.FillIn, FillInAnswer]):
+    def validate_answer(self, answer: AnyAnswer) -> FillInAnswer:
+        if not isinstance(answer, list):
+            raise type_error("Answer must be a list of strings.")
 
-    def get_grader(self) -> rz.Result[Grader[Any], str]:
-        return rz.err("Generic questions do not support automatic grading.")
+        for i, a in enumerate(answer):
+            if not isinstance(a, str):
+                msg = f"Answer at index {i} is {type(a).__name__}, expected str or empty."
+                raise type_error(msg)
 
-    def validate_answer(self, answer: Answer) -> rz.Result[Any, list[Issue]]:
-        raise NotImplementedError
+        return cast(FillInAnswer, answer)

@@ -9,7 +9,41 @@ import rich
 ARE_YOU_SURE_MSG = "Are you sure you're in a Chalk project?"
 
 
-class ChalkError[E: BaseEnum](Exception):
+class ChalkException(Exception):
+    """
+    Base class for all user-facing Chalk exceptions.
+    """
+
+
+class RosterNotFoundError(FileNotFoundError, ChalkException):
+    """
+    Raised when a roster file is not found in the expected location.
+    """
+
+
+class ResourceNotFoundError(ChalkException):
+    """
+    Raised when a requested resource file is not found.
+    """
+
+    def __init__(
+        self,
+        message: str = "Requested resource not found",
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+    ):
+        super().__init__(message, resource_type, resource_id)
+        self.resource_type = resource_type
+        self.resource_id = resource_id
+
+    def __str__(self):
+        message = self.args[0]
+        if self.resource_type and self.resource_id:
+            return f"{message} ({self.resource_type} = {self.resource_id!r})"
+        return message
+
+
+class ChalkErrorEnum[E: BaseEnum](Exception):
     """Base class for all user-facing Chalk exceptions."""
 
     @property
@@ -45,13 +79,13 @@ class BaseEnum(enum.StrEnum):
     A base class for enums that can be called to create a ChalkError with the enum member as the reason.
     """
 
-    def _exception_type(self) -> type[ChalkError[Any]]:
+    def _exception_type(self) -> type[ChalkErrorEnum[Any]]:
         """
         Get the type of ChalkError that should be created when this enum member is called.
         """
-        return ChalkError
+        return ChalkErrorEnum
 
-    def __call__(self, message: str | None = None, data: Any = None) -> ChalkError[Any]:
+    def __call__(self, message: str | None = None, data: Any = None) -> ChalkErrorEnum[Any]:
         """
         Allow the enum member to be called directly to create a ChalkError.
         """
@@ -61,7 +95,7 @@ class BaseEnum(enum.StrEnum):
         self,
         message: str | None = None,
         data: Any = None,
-    ) -> ChalkError[Any]:
+    ) -> ChalkErrorEnum[Any]:
         """
         Create a ChalkError with this error code and an optional message.
         """
@@ -94,16 +128,14 @@ class CannotGrade(BaseEnum):
     """
 
 
-class SystemError(BaseEnum):
+class ChalkError(BaseEnum):
     """
     Enumeration of error codes for global Chalk exceptions.
     """
 
     CONFIG_NOT_FOUND = f"Could not find chalk.toml. {ARE_YOU_SURE_MSG}"
     ROSTER_NOT_FOUND = f"Roster file not found. {ARE_YOU_SURE_MSG}"
-    MULTIPLE_ROSTERS_FOUND = "Multiple roster files found"
     INVALID_CONFIG = "Invalid chalk.toml configuration file"
-    BAD_ROSTER = "Invalid roster file"
-    MISSING_FIELD = "Missing required field in configuration or roster"
-    INVALID_FIELD = "Invalid value for field in configuration or roster"
+    INVALID_ROSTER = "Invalid roster file"
+    INVALID_RESOURCE = "Invalid resource file"
     RESOURCE_NOT_FOUND = "Requested resource not found"

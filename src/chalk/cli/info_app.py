@@ -59,14 +59,12 @@ def info(
     """
     Display detailed information about a Chalk project.
     """
-    if (classroom + debug + version) != 1:
-        raise ValueError(
-            "Only one of --classroom, --debug, or --version can be specified"
-        )
+    if (classroom + debug + version) > 1:
+        raise ValueError("Only one of --classroom, --debug, or --version can be specified")
 
-    if classroom:
-        display_project_info(format=validate_info_format(format))
-    elif debug:
+    if debug:
         display_debug_info(format=validate_info_format(format))
     elif version:
         display_version_info(format=validate_info_format(format))
+    else:
+        display_project_info(format=validate_info_format(format))

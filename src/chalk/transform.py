@@ -4,8 +4,8 @@ from typing import IO, Iterator
 
 from .builtin_scripts import TRANSFORM_REGISTRY
 from .builtin_scripts import Transform as TransformFn
-from .conf import find_project_root
-from .core import Answer
+from .core import AnyAnswer
+from .core.classroom import find_project_root
 
 ASSETS_BASE = Path(__file__).parent / "assets"
 
@@ -30,7 +30,7 @@ class Transform:
             path=path,
         )
 
-    def __call__(self, answer: Answer | None) -> Answer | None:
+    def __call__(self, answer: AnyAnswer | None) -> AnyAnswer | None:
         return self.transform(answer)
 
     def __str__(self) -> str:
@@ -41,10 +41,12 @@ def list_transforms(
     root: Path | None = None, *, registry: bool = True, custom: bool = True
 ) -> Iterator[Transform]:
     """
-    List available transformations in the speciified root.
+    List available transformations in the specified root.
     """
 
     root = find_project_root(root)
+    if root is None:
+        return
 
     if registry:
         for name, transform_fn in TRANSFORM_REGISTRY.items():
@@ -70,6 +72,8 @@ def create_script(
     Create a new transformation script with the specified name in the given root.
     """
     root = find_project_root(root)
+    if root is None:
+        raise FileNotFoundError("Project root not found")
 
     script_path = root / "scripts" / f"{name}-transform.{suffix}"
     if script_path.exists():
@@ -92,7 +96,7 @@ def _from_script(path: Path) -> TransformFn:
     Load a transformation from a script at the specified path.
     """
 
-    def transform(answer: Answer | None) -> Answer | None:
+    def transform(answer: AnyAnswer | None) -> AnyAnswer | None:
         raise NotImplementedError
 
     return transform

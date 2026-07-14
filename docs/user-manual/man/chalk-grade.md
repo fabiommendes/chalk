@@ -10,7 +10,7 @@ chalk grade <subcommand> <args> <options>
 
 ## DESCRIPTION
 
-Display and mark grades for assignments and students. Provides reporting
+Display and mark grades for quizzes and students. Provides reporting
 capabilities for grade summaries and details.
 
 ## SUBCOMMANDS
@@ -23,7 +23,7 @@ capabilities for grade summaries and details.
 
 ### chalk grade mark ASSIGNMENT_ID [QUESTION_ID]
 
-Mark ungraded submissions for an assignment, optionally limited to a specific
+Mark ungraded submissions for a quiz, optionally limited to a specific
 question.
 
 `-s, --student STUDENT` : Grade a specific student.
@@ -33,8 +33,8 @@ question.
 
 ### chalk grade override ASSIGNMENT_ID [QUESTION_ID]
 
-Override existing grades for an specific assignment and question. If QUESTION_ID
-is not provided, override the entire assignment grade.
+Override existing grades for an specific quiz and question. If QUESTION_ID
+is not provided, override the entire quiz grade.
 
 `-s, --student STUDENT` : Override grade for a specific student.
 
@@ -55,9 +55,9 @@ recorded in the grade history.
 
 ### chalk grade view
 
-Display grade information for students and assignments.
+Display grade information for students and quizzes.
 
-`-a, --assignment ASSIGNMENT` : Filter grades by a specific assignment.
+`-a, --quiz ASSIGNMENT` : Filter grades by a specific quiz.
 
 `-q, --question QUESTION` : Must be used together with `-a` to filter grades by
 a specific question. Show detailed information for the grading of that question.

@@ -24,7 +24,7 @@ nav:
           - chalk: user-manual/man/chalk.md
           - chalk-init: user-manual/man/chalk-init.md
           - chalk-roster: user-manual/man/chalk-roster.md
-          - chalk-assignment: user-manual/man/chalk-assignment.md
+          - chalk-quiz: user-manual/man/chalk-quiz.md
           - chalk-question: user-manual/man/chalk-question.md
           - chalk-response: user-manual/man/chalk-response.md
           - chalk-grade: user-manual/man/chalk-grade.md

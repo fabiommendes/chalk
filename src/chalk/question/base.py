@@ -1,247 +1,432 @@
 from __future__ import annotations
 
+import sys
 from abc import abstractmethod
+from collections.abc import Callable
 from decimal import Decimal
+from logging import getLogger
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
     Iterable,
+    Iterator,
     Literal,
-    Mapping,
     assert_never,
-    cast,
+    final,
+    overload,
 )
+from weakref import ref
 
 import errorz as rz
-from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer
+import opt
+from pydantic import Field
 
+from ..core import models
+from ..core.answer import serialize_answer
 from ..core.grader import Graded, Grader
-from ..core.issue import Issue as _issue
-from ..core.issue import IssueLevel, IssueLevelLike
-from ..core.submission import Response
-from ..data import serializers as s
-from ..data import validators as v
-from ..types import Answer, QuestionId, QuestionType, StudentId
-from ..util.show import display_field, rich_print
+from ..core.issue import Issue, IssueLevel, IssueLevelLike, list_of_issues
+from ..core.models import AnyAnswer, Autograder, QuestionId, QuestionType, StudentId
+from ..data import json, yaml
+from .renderable import RenderableQuestion
 
 if TYPE_CHECKING:
-    from ..core.assignment import Assignment
-    from ..question import (
-        Association,
-        FillIn,
-        MultipleChoice,
-        MultipleSelection,
-        Question,
-        Textual,
-    )
+    from ..core.quiz import Quiz
+    from ..question import Question
 
+log = getLogger(__name__)
 
 type QuestionScope = Literal["grading", "display", "validation", "response"]
-Issue = _issue[str, QuestionScope]
 type OK = Literal[True]
 ok: OK = True
-zero = Decimal(0)
-one = Decimal(1)
-issue: type[_issue] = _issue
 
 
-class BaseQuestion[AnswerT = Any](BaseModel):
-    id: QuestionId
-    type: QuestionType | None = None
-    name: str | None = None
-    grade: Annotated[
-        Decimal | None,
-        PlainSerializer(s.optional(s.decimal)),
-        BeforeValidator(v.optional(v.decimal)),
-    ] = None
-    answer_key: AnswerT | None = None
+__all__ = [
+    "BaseQuestion",
+    "validate_type",
+    "type_error",
+    "fail",
+    "empty_result",
+    "is_empty_issue",
+    "inference_issue",
+]
 
-    # Parent reference
-    _assignment: Annotated[
-        Assignment | None,
-        Field(repr=False, exclude=True),
-    ] = None
+
+class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuestion):
+    _conf: Conf
 
     @property
-    def title(self) -> str:
-        """
-        A human readable display for the question. Uses name or id, whichever is available.
-        """
-        return self.name or self.id.upper()
+    def id(self) -> QuestionId:
+        return self._id
 
-    def get_assignment(self) -> Assignment | None:
-        return self._assignment
+    @property
+    def conf(self) -> Conf:
+        return self._conf
 
-    def get_root_path(self, mkdir: bool = False) -> Path:
+    @property
+    def name(self) -> str:
+        return self._conf.name or self.id
+
+    @property
+    def value(self) -> Decimal:
+        return self._conf.value or Decimal(1)
+
+    @value.setter
+    def value(self, value: Decimal) -> None:
+        self._conf.value = value
+
+    @property
+    def autograder(self) -> Autograder:
+        return self._conf.autograder or Autograder()
+
+    @autograder.setter
+    def autograder(self, value: Autograder | None) -> None:
+        self._conf.autograder = value
+
+    @property
+    def type(self) -> QuestionType:
+        return getattr(self._conf, "type", None)
+
+    @property
+    def quiz(self) -> Quiz:
+        return opt.unpack(
+            self._quiz(),
+            throw=RuntimeError("Question is not associated with a quiz."),
+        )
+
+    @property
+    def answer_suffix(self) -> str | None:
+        return self.get_answer_extension()
+
+    @answer_suffix.setter
+    def answer_suffix(self, value: str | None) -> None:
+        self._conf.answer_suffix = value
+
+    @property
+    def root(self) -> Path:
+        return self.quiz.root / self.id
+
+    #: Classes that implement this declare that the answers can be converted to
+    #: a meaningful textual representation. Strings used as labels **SHOULD NOT**
+    #: be considered as text.
+    answer_to_text: Annotated[Callable[[Answer], str] | None, Field(exclude=True)] = None
+
+    def __init__(self, id: QuestionId, conf: Conf, *, quiz: Quiz):
+        self._conf = conf
+        self._id = id
+        self._quiz = ref(quiz)
+
+    #
+    # Getter functions
+    #
+    def get_root(self, mkdir: bool = False) -> Path:
         """
         Get the base path for this question, which is used to store question-specific
         files such as autograder scripts, test cases, etc.
+
+        Raises:
+            * NotADirectoryError if the path exists but is not a directory.
+            * FileNotFoundError if the path does not exist and mkdir is False.
         """
-        if self._assignment is None:
-            msg = "Question must be associated with an assignment to get its base path."
-            raise ValueError(msg)
-        base_path = self._assignment.base_path / self.id
+        path = self.quiz.root / self.id
 
-        if base_path.exists() and not base_path.is_dir():
-            msg = f"Path is not a directory: {base_path}"
-            raise RuntimeError(msg)
-
+        if path.exists() and not path.is_dir():
+            msg = f"Question path is not a directory: {path}"
+            raise NotADirectoryError(msg)
         if mkdir:
-            base_path.mkdir(parents=True, exist_ok=True)
-        return base_path
+            path.mkdir(parents=True, exist_ok=True)
+        elif not path.exists():
+            msg = f"Question path does not exist: {path}"
+            raise FileNotFoundError(msg)
 
-    def get_responses(self) -> Mapping[StudentId, Response]:
-        """
-        Get a mapping of student ids to responses.
+        return path
 
-        Requires the question to be associated with an assignment, otherise returns an empty mapping.
+    def get_persisted_answer(self, student_id: StudentId) -> Answer | None:
         """
-        assignment = self.get_assignment()
-        if assignment is None:
+        Read the answer from a local file
+        """
+        if not self.root.exists():
+            return None
+
+        if (suffix := self.get_answer_extension()) is not None:
+            path = self.root / "responses" / f"{student_id}.{suffix.removeprefix('.')}"
+            if not path.exists():
+                return None
+            return self.validate_answer(path.read_text())
+
+        return opt.pipe(
+            opt.single(self.root.glob(f"responses/{student_id}.*")),
+            Path.read_text,
+            self.validate_answer,
+        )
+
+    @overload
+    def get_answer_extension(self, default: str) -> str: ...
+
+    @overload
+    def get_answer_extension(self, default: str | None = None) -> str | None: ...
+
+    def get_answer_extension(self, default: str | None = None) -> str | None:
+        """
+        Get the suffix for answer files for this question, if any.
+
+        This is used to determine the file type of answer files when reading
+        them from disk.
+        """
+        return opt.map(
+            lambda s: s.removeprefix("."),
+            opt.unwrap(self._conf.answer_suffix, default),
+        )
+
+    def get_autograder(self) -> Autograder:
+        """
+        Get the autograder configuration for this question, or a default configuration if none is set.
+        """
+        if self.autograder is not None:
+            return self.autograder
+        elif self._quiz is not None:
+            return self.quiz.get_autograder()
+        return Autograder()
+
+    def get_autograde_script(self, *, check_exists: bool = True) -> Path | None:
+        """
+        Get the path to the autograder script.
+
+        If the script is not specified, return the path to the default script.
+        """
+        name = self.get_autograder().script
+        if name is not None:
+            path = self.root / name
+        else:
+            files = list(self.root.glob("autograde.*"))
+            match files:
+                case []:
+                    return None
+                case [file]:
+                    path = file
+                case _:
+                    files = sorted(files, key=script_priority)
+                    msg = f"multiple autograding scripts found for {self.quiz.id}/{self.id}, using {files[0]}"
+                    log.warning(msg)
+                    path = files[0]
+        if check_exists and not path.exists():
+            return None
+        return path
+
+    def get_template_path(self, *, check_exists: bool = True) -> Path | None:
+        """
+        Get the path to the template directory for this question, if any.
+
+        If the template does not exist or if it is invalid, return None.
+        """
+        path = self.get_autograder().template or Path("template")
+        if path.is_absolute():
+            path = self.quiz.classroom.root / path.relative_to("/")
+        else:
+            path = self.root / path
+
+        if check_exists and (not path.exists() or not path.is_dir()):
+            return None
+        return path
+
+    def get_grader(self) -> Grader[Answer] | None:
+        """
+        Get the default Grader object for this question, which can be used to
+        validate and grade answers to the question.
+
+        If the question do not support automatic grading, return None.
+        """
+        if not hasattr(self, "grade_answer"):
+            return None
+
+        def grader(id: StudentId, answer: Answer, /, **kwargs: Any) -> Graded | None:
+            return self.grade_answer(answer)  # type: ignore
+
+        return grader
+
+    def get_answer_key(self) -> Answer | None:
+        """
+        Get the answer key for this question, if any.
+
+        The answer key may be stored in the conf file or on a separate file
+        depending on the question type. By default we look at <question-root>/answer_key.{ext}
+
+        Raises:
+            ValueError if the answer key exists, but its content is invalid.
+        """
+        ext = self.get_answer_extension("txt")
+        path = self.root / f"answer_key.{ext}"
+        if path.exists():
+            src = path.read_text()
+            return self.validate_answer(src)
+
+    def get_template_answers(self) -> dict[str, Answer]:
+        """
+        Get the template answers for this question, if any.
+
+        It look for templates in <question-root>/answers/*.{ext} where {ext}
+        is the default answer extension for this question.
+        """
+        base = self.root / "answers"
+        if not base.exists():
             return {}
-        return assignment.get_responses_for_question(self.id)
 
+        templates = {}
+        ext = self.get_answer_extension(default="txt")
+        for path in base.glob(f"*.{ext}"):
+            templates[path.stem] = self.validate_answer(path.read_text())
+        return templates
+
+    def get_reference_from_file(self, name: str, /) -> Answer | None:
+        """
+        Get a reference answer from a file with the given name, if it exists.
+
+        The file is searched for in the question's base path, which is typically
+        the quiz's base path joined with the question's id.
+        """
+        root = self.get_root()
+        path = root / name
+        if not path.exists():
+            return None
+
+        if name.endswith(".yaml") or name.endswith(".yml"):
+            answer = yaml.load(path.open())
+        elif name.endswith(".json"):
+            answer = json.load(path.open())
+        else:
+            answer = path.read_text(encoding="utf-8")
+
+        return rz.unwrap(self.validate_answer(answer), None)
+
+    #
+    # Validation methods
+    #
+    @abstractmethod
+    def validate_answer(self, answer: Any, /) -> Answer:
+        """
+        Validate a student answer and return a list of issues
+        with the answer that may prevent it from being graded correctly.
+
+        Should raise an ValueError if the answer is invalid.
+
+        This method should always accept string even when the expected answer
+        type is different. When possible, it should parse the strings and
+        convert them to the expected answer type.
+        """
+        raise NotImplementedError("Must be implemented by subclasses.")
+
+    def serialize_answer(self, answer: Answer, /) -> str:
+        """
+        Convert the given answer to a string representation.
+        """
+        return serialize_answer(answer)
+
+    @final
     def validate_question(
         self,
         *,
         level: IssueLevelLike = IssueLevel.ALL,
         scope: QuestionScope | None = None,
-    ) -> rz.Result[OK, list[Issue]]:
+        check_responses: bool = False,
+        fix: bool = False,
+        error: Literal["raise", "ignore"] = "raise",
+    ) -> list[Issue]:
         """
-        Get a list of issues with the question that may prevent it from behaving
-        correctly.
+        Validate itself under a given severity level. It may change the question
+        inplace to fix issues that are fixable automatically.
 
-        This can be used to provide feedback to instructors when they create
-        or edit questions.
+        Raise a ValueError with a list of issues if it fails.
 
-        Observations:
-            Implementers of subclasses may prefer to override any of the specialized
-            methods
-                _get_issues() - issues of any type
-                _get_grading_issues() - only grading issues
-                _get_display_issues() - only display issues
-                _get_validation_issues() - only validation issues
+        Args:
+            level:
+                The severity level to validate against. Only issues with a severity
+                equal to or higher than this level will be considered.
+            scope:
+                The scope of issues to validate against. Only issues within this
+                scope will be considered.
+            check_responses:
+                If True, responses will be validated as well.
+            fix:
+                If True, fixable issues will be automatically fixed.
+
+        See also:
+            * func:`BaseQuestion.iter_issues` for a more detailed list of issues.
         """
-        issues: list[Issue] = list(self._get_issues())
-        if scope is not None:
-            issues = [issue for issue in issues if scope in issue.scopes]
-        if scope in (None, "grading"):
-            issues.extend(ensure_scope("grading", self._get_grading_issues()))
-        if scope in (None, "display"):
-            issues.extend(ensure_scope("display", self._get_display_issues()))
-        if scope in (None, "validation"):
-            issues.extend(ensure_scope("validation", self._get_validation_issues()))
+        issues = list(self.iter_issues(level=level, scope=scope, check_responses=check_responses))
+        if error == "raise" and issues:
+            raise ValueError(issues)
+        if fix and issues:
+            self.quiz.save()
+        return issues
 
-        level = IssueLevel.construct(level)
-        errors = [issue for issue in issues if issue.severity & level]
-        return rz.err(errors) if errors else ok
-
-    def validate_question_with_responses(
+    def iter_issues(
         self,
-        responses: Mapping[StudentId, Response],
         *,
         level: IssueLevelLike = IssueLevel.ALL,
         scope: QuestionScope | None = None,
-    ) -> rz.Result[OK, list[Issue]]:
-        """
-        Allow pass information from responses to cross-validate the question
-        and the responses together.
+        check_responses: bool = False,
+        fix: bool = False,
+    ) -> Iterator[Issue]:
+        ref_level = IssueLevel.construct(level)
 
-        The default implementation simply calls validate_question and ignore
-        the responses.
-        """
-        return self.validate_question(level=level, scope=scope)
+        has_scope: Callable[[Issue], bool] = lambda _: True
+        if scope:
+            has_scope = lambda issue: scope in issue.scopes
 
-    @abstractmethod
-    def validate_answer(self, answer: Answer, /) -> rz.Result[AnswerT, list[Issue]]:
-        """
-        Validate a student answer and return a list of issues
-        with the answer that may prevent it from being graded correctly.
+        for issue in self._iter_issues():
+            if ref_level.accepts(issue.severity) and has_scope(issue):
+                yield issue
+            yield issue
 
+        if scope in (None, "grading"):
+            for issue in self._get_grading_issues():
+                if ref_level.accepts(issue.severity) and has_scope(issue):
+                    yield issue
+
+        if scope in (None, "display"):
+            for issue in self._get_display_issues():
+                if ref_level.accepts(issue.severity) and has_scope(issue):
+                    yield issue
+
+        if scope in (None, "validation"):
+            for issue in self._get_validation_issues():
+                if ref_level.accepts(issue.severity) and has_scope(issue):
+                    yield issue
+
+    def validate_responses(
+        self, /, *, save: bool = False, error: Literal["raise", "ignore"] = "raise"
+    ) -> dict[StudentId, Answer]:
+        """
+        Validate responses and return a dictionary mapping student ids to
+        validation answers.
+
+        It always iterate over all responses collecting errors and raise
+        a ValueError with a list of issues when done.
+
+        Args:
+            save:
+                If True, the responses will be saved after validation.
+            error:
+                Determines how validation errors are handled. "raise" will raise a ValueError with a list of issues, "ignore" will ignore errors.
         """
         raise NotImplementedError("Must be implemented by subclasses.")
 
-    def validate_responses(
-        self, responses: Mapping[StudentId, Response], /, *, inplace: bool = False
-    ) -> dict[StudentId, rz.Result[Response, list[Issue]]]:
+    def iter_response_issues(self) -> Iterator[tuple[StudentId, list[Issue]]]:
         """
-        Validate a set of responses and return a dictionary mapping student ids to
-        validation results.
-
-        May allow for validation that depends on multiple responses (e.g. for plagiarism detection).
-
-        Args:
-            responses:
-                A mapping of student ids to responses.
-            inplace:
-                If True, the responses will be modified *in place*.
-        """
-        results: dict[StudentId, rz.Result[Response, list[Issue]]] = {}
-        for student_id, response in responses.items():
-            raw_answer = response.answer
-            if raw_answer is None:
-                continue
-
-            answer: AnswerT | None = None
-            result = self.validate_answer(raw_answer)
-            if rz.is_err(result) and is_empty_issue(result.error):
-                answer = None
-            elif rz.is_err(result):
-                results[student_id] = result
-                continue
-            else:
-                answer = result
-
-            if inplace:
-                response.answer = cast(Answer, answer)
-            else:
-                response = response.model_copy(update={"answer": answer})
-
-            results[student_id] = response
-        return results
-
-    def get_grader(self) -> rz.Result[Grader[AnswerT], str]:
-        """
-        Get the default Grader object for this question, which can be used to
-        validate and grade answers to the question.
-
-        If the question do not support automatic grading, return an error
-        with an appropriate message.
-        """
-        if not hasattr(self, "grade_answer"):
-            return rz.err("This question type does not support automatic grading.")
-
-        def grader(id: StudentId, answer: AnswerT, /, **kwargs: Any) -> Graded | None:
-            return self.grade_answer(answer)  # type: ignore
-
-        return grader
-
-    def display(self, rich: bool = True) -> None:
-        """
-        Display the question in the console.
+        Iterate over all responses and yield a tuple of student id and a list of issues
+        for each response that has issues.
         """
 
-        # Print title
-        if self.name and self.name != self.id:
-            rich_print(f"[bold underline]{self.name} [dim]({self.id})[/]", rich=rich)
-        else:
-            rich_print(f"[bold underline]{self.title}[/]", rich=rich)
+        for student_id, answer in self.quiz.submissions.iter_answers(question=self.id):
+            try:
+                self.validate_answer(answer)
+            except ValueError as e:
+                yield student_id, list_of_issues(e, scopes=["response"])
 
-        # Print basic info
-        display_field("type", self.type, rich=rich)
-        display_field("grade", self.grade, rich=rich)
-
-    def display_answer(self, answer: Any, rich: bool = True) -> None:
-        """
-        Display the answer to the question in the console.
-        """
-        if answer is None and rich:
-            rich_print("No answer provided.", rich=rich, style="italic")
-        else:
-            rich_print(answer, rich=rich)
-
+    #
+    # Other
+    #
     def convert_to(
         self,
         new_type: QuestionType,
@@ -251,35 +436,64 @@ class BaseQuestion[AnswerT = Any](BaseModel):
         Convert this question to a new type, if possible. This is used to allow
         autograders to convert questions to a different type if needed for grading.
         """
-        data = data or {}
+        dump = self.conf.model_dump()
+        dump.update(data or {})
+
         match new_type:
             case "text":
-                return Textual.model_validate(
-                    {**self.model_dump(), **data, "type": "text"}
-                )
+                from .textual import Textual
+
+                conf = models.Textual.model_validate(dump)
+                return Textual(self.id, conf, quiz=self.quiz)
             case "multiple-choice":
-                return MultipleChoice.model_validate(
-                    {**self.model_dump(), **data, "type": "multiple-choice"}
-                )
+                from .multiple_choice import MultipleChoice
+
+                conf = models.MultipleChoice.model_validate(dump)
+                return MultipleChoice(self.id, conf, quiz=self.quiz)
             case "multiple-selection":
-                return MultipleSelection.model_validate(
-                    {**self.model_dump(), **data, "type": "multiple-selection"}
-                )
+                from .multiple_selection import MultipleSelection
+
+                conf = models.MultipleSelection.model_validate(dump)
+                return MultipleSelection(self.id, conf, quiz=self.quiz)
             case "association":
-                return Association.model_validate(
-                    {**self.model_dump(), **data, "type": "association"}
-                )
+                from .association import Association
+
+                conf = models.Association.model_validate(dump)
+                return Association(self.id, conf, quiz=self.quiz)
             case "fill-in":
-                return FillIn.model_validate(
-                    {**self.model_dump(), **data, "type": "fill-in"}
-                )
+                from .fillin import FillIn
+
+                conf = models.FillIn.model_validate(dump)
+                return FillIn(self.id, conf, quiz=self.quiz)
+
+            case "repo":
+                from .repo import Repo
+
+                conf = models.Repo.model_validate(dump)
+                return Repo(self.id, conf, quiz=self.quiz)
+
+            case None:
+                conf = models.GenericQuestion.model_validate(dump)
+                return Generic(self.id, conf, quiz=self.quiz)
+
             case _:
                 assert_never(new_type)
 
+    def clear_autograder_files(self):
+        """
+        Clear temporary files generated by the autograder for this question.
+        """
+        base = self.get_root()
+        for path in base.glob("tmp-*"):
+            if path.is_dir():
+                print(path)
+                # shutil.rmtree(path, ignore_errors=True)
+
     #
-    # Private methods
+    # Private methods designed to be overriden
     #
-    def _get_issues(self) -> Iterable[Issue]:
+
+    def _iter_issues(self) -> Iterable[Issue]:
         """
         Get a list of issues that may prevent the question from behaving correctly in any way.
 
@@ -323,12 +537,10 @@ class Generic(BaseQuestion):
     A question with no specific assigned format.
     """
 
-    type: Literal[None] = None  # pyright: ignore[reportIncompatibleVariableOverride]
+    def get_grader(self) -> Grader[Any] | None:
+        return None
 
-    def get_grader(self) -> rz.Result[Grader[Any], str]:
-        return rz.err("Generic questions do not support automatic grading.")
-
-    def validate_answer(self, answer: Answer) -> rz.Result[Any, list[Issue]]:
+    def validate_answer(self, answer: AnyAnswer) -> rz.Result[Any, list[Issue]]:
         return rz.ok(answer)
 
 
@@ -340,46 +552,42 @@ def ensure_scope(scope: QuestionScope, issues: Iterable[Issue]) -> Iterable[Issu
     return (issue.with_scopes([scope]) for issue in issues)
 
 
-def validate_type[T](
-    value: Answer, typ: type[T], /, msg: str | None = None
-) -> rz.Result[T, list[Issue]]:
+def validate_type[T](value: AnyAnswer, typ: type[T], /, msg: str | None = None) -> T:
     if not isinstance(value, typ):
         if msg is None:
             msg = f"Expected type {type.__name__}, got {type(value).__name__}"
-        return rz.err(
-            [
-                Issue.error(
-                    "type-error",
-                    (msg or "Invalid type") + f", got {type(value).__name__}",
-                    scopes=["response"],
-                )
-            ]
-        )
-    return rz.ok(value)
+        raise type_error(msg)
+    return value
+
+
+def type_error(msg: str | None = None) -> ValueError:
+    """
+    Raise an ValueError with a type error message.
+    """
+    issue = Issue.error("type-error", msg, scopes=["response"])
+    return ValueError(issue)
 
 
 def fail(
     code: str,
     message: str,
+    /,
     severity: IssueLevelLike = IssueLevel.ERROR,
     scopes: Iterable[QuestionScope] = ("response",),
-) -> rz.Result[Any, list[Issue]]:
+) -> ValueError:
     """
     Create an issue with the given code, message, severity, and scopes.
     """
-    return rz.err(
-        [
-            _issue(
-                code=code,
-                message=message,
-                severity=IssueLevel.construct(severity),
-                scopes=frozenset(scopes),
-            )
-        ]
+    issue = Issue(
+        code=code,
+        message=message,
+        severity=IssueLevel.construct(severity),
+        scopes=frozenset(scopes),
     )
+    return ValueError(issue)
 
 
-def empty_issue(message: str = "Empty answer.") -> rz.Result[Any, list[Issue]]:
+def empty_result(message: str = "Empty answer.") -> ValueError:
     """
     Create an issue for an empty answer.
     """
@@ -391,3 +599,37 @@ def is_empty_issue(issues: list[Issue]) -> bool:
     Check if the given list of issues contains any empty answer issues.
     """
     return any(issue.code == "empty" and "response" in issue.scopes for issue in issues)
+
+
+def inference_issue(msg: str) -> Issue:
+    """
+    Used to flag a problem when trying to infer question parameters from submissions.
+    """
+    return Issue(
+        code="inference-error",
+        message=msg,
+        scopes=frozenset(["grading", "validation"]),
+    )
+
+
+def script_priority(path: Path) -> tuple[int, str]:
+    """
+    Get the priority of a script based on its extension.
+
+    The lower the number, the higher the priority.
+    """
+    ext = path.suffix.lower()
+
+    if ext in {".py"}:
+        return (0, ext)
+    if ext in {".sh", ".bash"}:
+        if sys.platform == "win32":
+            return (2, ext)
+        return (1, ext)
+    if ext in {".bat", ".cmd"}:
+        if sys.platform == "win32":
+            return (1, ext)
+        return (2, ext)
+    if not ext:
+        return (3, ext)
+    return (4, ext)

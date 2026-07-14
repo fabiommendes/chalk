@@ -10,12 +10,12 @@ chalk report <subcommand> <args> <options>
 
 ## DESCRIPTION
 
-Creates reports by class, assignment, student, or student detail.
+Creates reports by class, quiz, student, or student detail.
 
 ## SUBCOMMANDS
 
 - class
-- assignment ASSIGNMENT_ID
+- quiz ASSIGNMENT_ID
 - student STUDENT_ID
 - student-detail STUDENT_ID
 
@@ -24,12 +24,12 @@ Creates reports by class, assignment, student, or student detail.
 ### chalk report class
 
 - --sort-students FIELD
-- --sort-assignments FIELD
+- --sort-quizzes FIELD
 - --include-missing
 - -f, --format FORMAT
 - -o, --output PATH
 
-### chalk report assignment ASSIGNMENT_ID
+### chalk report quiz ASSIGNMENT_ID
 
 - --include-questions
 - --include-feedback
@@ -39,7 +39,7 @@ Creates reports by class, assignment, student, or student detail.
 
 ### chalk report student STUDENT_ID
 
-- -a, --assignment ASSIGNMENT_ID
+- -a, --quiz ASSIGNMENT_ID
 - --include-answers
 - --include-feedback
 - -f, --format FORMAT
@@ -47,7 +47,7 @@ Creates reports by class, assignment, student, or student detail.
 
 ### chalk report student-detail STUDENT_ID
 
-- -a, --assignment ASSIGNMENT_ID
+- -a, --quiz ASSIGNMENT_ID
 - --with-metadata
 - -f, --format FORMAT
 - -o, --output PATH
@@ -56,7 +56,7 @@ Creates reports by class, assignment, student, or student detail.
 
 ```bash
 chalk report class --format csv --output reports/class.csv
-chalk report assignment exam-01 --include-questions
+chalk report quiz exam-01 --include-questions
 chalk report student s123 --include-feedback
 ```
 

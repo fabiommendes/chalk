@@ -9,12 +9,13 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "cytoolz>=1.1.0",
-    "errorz>=0.1.0",
+    "errorz>=0.2.1",
     "natsort>=8.4.0",
-    "optionz>=0.1.2",
+    "optionz>=0.2.0",
     "pandas>=3.0.3",
     "pandas-stubs>=3.0.0.260204",
-    "pandera>=0.31.1",
+    "pandera[pandas]>=0.31.1",
+    "plagiarism",
     "pydantic>=2.13.4",
     "pygments>=2.20.0",
     "pyyaml>=6.0.3",
@@ -22,6 +23,7 @@ dependencies = [
     "taskipy>=1.14.1",
     "toolz>=1.1.0",
     "toolz-stubs>=0.4.1",
+    "typeguard>=4.5.2",
     "typer",
     "types-openpyxl>=3.1.5.20260508",
     "types-pyyaml>=6.0.12.20260510",
@@ -57,3 +59,27 @@ docs-serve = { cmd = "uv run mkdocs serve", help = "Serve HTML documentation wit
 test = "pytest tests"
 lint = "ruff check ."
 build = "uv build"
+
+[tool.uv.sources]
+plagiarism = { path = "../plagiarism", editable = true }
+optionz = { path = "../optionz", editable = true }
+resultz = { path = "../resultz", editable = true }
+
+[tool.uv.build-backend]
+module-name = "chalk"
+module-root = "."
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 80
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 120
+
+[tool.ruff.lint]
+ignore = [
+    "E731", # do not assign a lambda expression, use a def
+]

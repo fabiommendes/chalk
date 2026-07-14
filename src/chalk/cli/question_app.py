@@ -2,16 +2,15 @@ import sys
 from pathlib import Path
 from typing import Annotated
 
-import errorz as rz
 import opt
 import rich
 import typer
 
-from ..core import Assignment, SystemError
+from ..core import Classroom
 from ..table import Table, validate_table_format
-from .util import read_assignment_and_question, safe
+from .util import safe
 
-app = typer.Typer(help="Manage questions in assignments.", no_args_is_help=True)
+app = typer.Typer(help="Manage questions in quizzes.", no_args_is_help=True)
 
 
 # ==============================================================================
@@ -20,11 +19,11 @@ app = typer.Typer(help="Manage questions in assignments.", no_args_is_help=True)
 @app.command(name="list")
 @safe
 def list_questions(
-    assignment_id: Annotated[
+    quiz_id: Annotated[
         str | None,
         typer.Argument(
             ...,
-            help="Assignment identifier (e.g. 'hw1', 'exam1', etc.)",
+            help="Quiz identifier (e.g. 'hw1', 'exam1', etc.)",
         ),
     ] = None,
     sort: Annotated[
@@ -59,9 +58,9 @@ def list_questions(
     ] = None,
 ) -> None:
     """
-    Show the current list of questions in the specified assignment.
+    Show the current list of questions in the specified quiz.
     """
-    assignment = Assignment.prompt(assignment_id)
+    cfg, quiz = Classroom.from_prompt(quiz_id=quiz_id)
 
     if sort is not None and sort not in {"id", "name", "type", "grade"}:
         rich.print(f"[b red]Invalid sort column: {sort}[/]", file=sys.stderr)
@@ -69,23 +68,16 @@ def list_questions(
 
     rows = []
     ids: list[str] = []
-    for id, question in (questions := assignment.get_questions()).items():
+    for id, question in (questions := quiz.get_questions()).items():
         cells = {
             "name": question.name,
             "type": question.type,
-            "grade": question.grade,
+            "grade": question.value,
         }
 
         ids.append(id)
         rows.append(cells)
-    total = (
-        sum(
-            question.grade
-            for question in questions.values()
-            if question.grade is not None
-        )
-        or None
-    )
+    total = sum(question.value for question in questions.values()) or None
 
     table = Table(rows, index=ids)
     table = table.select_columns(["name", "type", "grade"])
@@ -104,11 +96,11 @@ def list_questions(
 @app.command(name="show")
 @safe
 def show(
-    assignment_id: Annotated[
+    quiz_id: Annotated[
         str | None,
         typer.Argument(
             ...,
-            help="Assignment identifier (e.g. 'hw1', 'exam1', etc.)",
+            help="Quiz identifier (e.g. 'hw1', 'exam1', etc.)",
         ),
     ] = None,
     question_id: Annotated[
@@ -130,11 +122,9 @@ def show(
     ] = False,
 ) -> None:
     """
-    Show details of an assignment.
+    Show details of a quiz.
     """
-    _, question = read_assignment_and_question(assignment_id, question_id)
-
-    question.display()
+    Classroom.from_prompt(quiz_id=quiz_id, question_id=question_id).question.render()
 
 
 # ==============================================================================
@@ -147,14 +137,14 @@ def merge(
         str,
         typer.Argument(
             ...,
-            help="ID of the first assignment to merge",
+            help="ID of the first quiz to merge",
         ),
     ],
     id2: Annotated[
         str,
         typer.Argument(
             ...,
-            help="ID of the second assignment to merge",
+            help="ID of the second quiz to merge",
         ),
     ],
     output_id: Annotated[
@@ -163,24 +153,25 @@ def merge(
             ...,
             "-o",
             "--output",
-            help="ID for the merged assignment (defaults to ID1)",
+            help="ID for the merged quiz (defaults to ID1)",
         ),
     ] = None,
 ) -> None:
     """
-    Merge two assignments into a single assignment file.
+    Merge two quizzes into a single quiz file.
 
     This is useful for merging changes from different branches or collaborators.
     """
-    assignment1 = Assignment.prompt(id1)
-    assignment2 = Assignment.prompt(id2)
+    cfg = Classroom.load()
+    quiz1 = cfg.prompt_quiz(id1)
+    quiz2 = cfg.prompt_quiz(id2)
 
     if output_id is None:
         output_id = id1 + "-merged"
 
-    msg = f"Merging assignments '{assignment1.name}' and '{assignment2.name}' into '{output_id}'..."
+    msg = f"Merging quizzes '{quiz1.name}' and '{quiz2.name}' into '{output_id}'..."
     print(msg)
-    raise NotImplementedError("Assignment merging is not yet implemented")
+    raise NotImplementedError("Quiz merging is not yet implemented")
 
 
 # ==============================================================================
@@ -189,7 +180,7 @@ def merge(
 @app.command()
 @safe
 def convert(
-    assignment_id: Annotated[
+    quiz_id: Annotated[
         str | None,
         typer.Argument(metavar="ASSIGNMENT"),
     ] = None,
@@ -208,10 +199,10 @@ def convert(
     ] = None,
 ) -> None:
     """
-    Show all grades for the given assignment and student.
+    Show all grades for the given quiz and student.
     """
 
-    assignment, question = read_assignment_and_question(assignment_id, question_id)
+    _, quiz, question = Classroom.from_prompt(quiz_id=quiz_id, question_id=question_id)
 
     if format:
         if question.type == format:
@@ -220,9 +211,9 @@ def convert(
             return
         if question.type is not None:
             msg = f"Cannot convert question of type {question.type} to {format}"
-            raise SystemError.INVALID_FIELD(msg)
+            raise ValueError(msg)
 
-        responses = assignment.get_responses_for_question(question.id)
+        responses = quiz.submissions.iter_answers(question=question)
         rich.print(responses)
 
 
@@ -232,7 +223,7 @@ def convert(
 @app.command()
 @safe
 def issues(
-    assignment_id: Annotated[
+    quiz_id: Annotated[
         str | None,
         typer.Argument(metavar="ASSIGNMENT"),
     ] = None,
@@ -273,26 +264,12 @@ def issues(
     Show all issues for the given question.
     """
 
-    assignment, question = read_assignment_and_question(assignment_id, question_id)
-    result = question.validate_question_with_responses(question.get_responses())
-    responses = question.validate_responses(question.get_responses(), inplace=fix)
-
-    issues = [
-        issue
-        for issues in responses.values()
-        if rz.is_err(issues)
-        for issue in issues.error
-    ]
-
-    if rz.is_err(result):
-        issues.extend(result.error)
-
-    if issues:
-        for issue in sorted(set(issues)):
-            issue.display()
-            print()
+    ctx = Classroom.from_prompt(quiz_id=quiz_id, question_id=question_id)
+    ctx.question.validate_question()
+    # TODO
+    raise NotImplementedError
 
     if not issues:
         rich.print("No issues found with this question 🥳.")
     elif fix:
-        assignment.save()
+        ctx.quiz.save()

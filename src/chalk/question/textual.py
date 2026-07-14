@@ -1,32 +1,23 @@
 import re
-from decimal import Decimal
 from functools import lru_cache
-from typing import Annotated, Any, Literal
+from typing import Any, Iterable, override
 
-import errorz as rz
 import opt
-from pydantic import BeforeValidator, PlainSerializer
-from rich.console import Console
+from rich.console import RenderableType
 from rich.syntax import Syntax
 
-from ..autograder import autograder_scripts
+from ..core import models
+from ..core.answer import TextualAnswer
 from ..core.grader import Grader
-from ..data import serializers as s
-from ..data import validators as v
-from ..types import Answer
-from ..util.show import display_field
 from .base import (
     BaseQuestion,
-    Issue,
-    empty_issue,
+    empty_result,
     validate_type,
 )
-
-one = Decimal(1)
-zero = Decimal(0)
+from .renderable import RenderableField
 
 
-class Textual(BaseQuestion[str]):
+class Textual(BaseQuestion[models.Textual, TextualAnswer]):
     """
     Textual questions have a text-based answer.
 
@@ -34,74 +25,66 @@ class Textual(BaseQuestion[str]):
     different forms like plain text, code snippets, mathematical formulas, etc.
     """
 
-    type: Literal["text"] = "text"  # pyright: ignore[reportIncompatibleVariableOverride]
-    format: Annotated[str | None, BeforeValidator(v.optional(v.text_format))] = None
-    regex_validator: Annotated[
-        re.Pattern[str] | None,
-        BeforeValidator(v.optional(v.regex)),
-        PlainSerializer(s.optional(s.regex)),
-    ] = None
-    regex_grader: Annotated[
-        re.Pattern[str] | None,
-        BeforeValidator(v.optional(v.regex)),
-        PlainSerializer(s.optional(s.regex)),
-    ] = None
-    accepts_blank: bool = False
+    @property
+    def format(self) -> str:
+        return self._conf.format or "text"
 
-    def display_answer(self, answer: Any, rich: bool = True) -> None:
+    @property
+    def regex_validator(self) -> re.Pattern[str] | None:
+        return self._conf.regex_validator
+
+    @property
+    def regex_grader(self) -> re.Pattern[str] | None:
+        return self._conf.regex_grader
+
+    @property
+    def accepts_blank(self) -> bool:
+        return self._conf.blank
+
+    @property
+    def plagiarism(self) -> models.Plagiarism | None:
+        return self._conf.plagiarism
+
+    def get_answer_extension(self, default: str | None = None) -> str:
+        suffix = suffix_from_format(self.format)
+        return super().get_answer_extension(default=default or suffix)
+
+    def render_answer(self, answer: TextualAnswer, plain: bool = False) -> RenderableType:
         """
         Render the question as a string.
         """
-        if (
-            self.format is not None
-            and self.format in syntax_highlight_formats()
-            and rich
-        ):
-            syntax = Syntax(answer, self.format, line_numbers=True, theme="monokai")
-            Console().print(syntax)
+        if self.format is not None and self.format in syntax_highlight_formats() and not plain:
+            return Syntax(answer, self.format, line_numbers=True, theme="monokai")
         else:
-            super().display_answer(answer, rich)
+            return answer
 
-    def get_grader(self) -> rz.Result[Grader[str], str]:
+    def get_grader(self) -> Grader[str] | None:
         if self.regex_grader is not None:
             from ..autograder.regex_grader import RegexGrader
 
-            return RegexGrader(
-                self.regex_grader,
-                grade=self.grade or one,
-                match="search",
-            )
+            return RegexGrader(self.regex_grader, grade=self.value, match="search")
 
-        root = self.get_root_path()
-        match autograder_scripts(root):
-            case [script]:
-                from ..autograder.script_grader import ScriptGrader
+        script = self.get_autograde_script()
+        if script is None:
+            return None
 
-                return ScriptGrader(
-                    root,
-                    script=script,
-                    grade=self.grade or one,
-                    question_id=self.id,
-                    assignment_id=opt.unwrap(self._assignment).id,
-                )
-            case []:
-                return rz.err("No autograder or regex pattern found.")
-            case _:
-                return rz.err("Multiple autograder scripts are not supported yet.")
+        from ..autograder.script_grader import ScriptGrader
 
-    def validate_answer(self, answer: Answer) -> rz.Result[str, list[Issue]]:
-        if rz.is_err(val := validate_type(answer, str)):
-            return val
-        if not self.accepts_blank and val.strip() == "":
-            return empty_issue()
-        return rz.ok(val)
+        return ScriptGrader(script=script, question=self, conf=self.get_autograder())
 
-    def display(self, rich: bool = True) -> None:
-        super().display(rich=rich)
-        display_field("validator", opt.map(regex_fmt, self.regex_validator), rich=rich)
-        display_field("pattern", opt.map(regex_fmt, self.regex_grader), rich=rich)
-        display_field("format", self.format, rich=rich)
-        display_field("accepts blank", self.accepts_blank, rich=rich)
+    def validate_answer(self, data: Any) -> TextualAnswer:
+        answer = validate_type(data, str)
+        if not self.accepts_blank and answer.strip() == "":
+            raise empty_result()
+        return answer
+
+    @override
+    def _render_base_fields(self, plain: bool = False) -> Iterable[tuple[str, RenderableField]]:
+        yield from super()._render_base_fields(plain)
+        yield "validator", opt.map(regex_fmt, self.regex_validator)
+        yield "pattern", opt.map(regex_fmt, self.regex_grader)
+        yield "format", self.format
+        yield "accepts blank", self.accepts_blank
 
 
 @lru_cache(1)
@@ -114,9 +97,31 @@ def syntax_highlight_formats() -> set[str]:
     return lexers
 
 
+@lru_cache(1)
+def syntax_highlight_suffixes() -> dict[str, str]:
+    from pygments.lexers import get_all_lexers
+
+    mapping: dict[str, str] = {}
+    for _, names, suffixes, _ in get_all_lexers():
+        suffix = suffixes[0].removeprefix("*.") if suffixes else None
+        if suffix is None:
+            continue
+        for name in names:
+            mapping[name] = suffix
+    mapping["text"] = "txt"
+    return mapping
+
+
 def regex_fmt(pattern: re.Pattern[str]) -> str:
     """
     Format a regex pattern for display.
     """
     pat = pattern.pattern.replace("/", "\\/")
     return f"/{pat}/"
+
+
+def suffix_from_format(fmt: str) -> str:
+    """
+    Get a suffix for the answer based on the format.
+    """
+    return syntax_highlight_suffixes().get(fmt, "txt")

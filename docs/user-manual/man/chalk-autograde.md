@@ -23,7 +23,7 @@ Provides automatic grading commands.
 
 ### chalk autograde new [ASSIGNMENT QUESTION TEMPLATE]
 
-Create a new autograder script for the specified assignment and question.
+Create a new autograder script for the specified quiz and question.
 
 `-l, --list-templates [FILTER]` 
 : List available autograder templates without creating a new script. Optionally, 
@@ -35,7 +35,7 @@ Create a new autograder script for the specified assignment and question.
 
 ### chalk autograde run ASSIGNMENT [QUESTION]
 
-Run the autograder for the specified assignment and question.
+Run the autograder for the specified quiz and question.
 
 `-y, --yes` 
 : Automatically confirm any prompts during the grading process.
@@ -64,7 +64,7 @@ Run the autograder for the specified assignment and question.
 
 ### chalk autograde try ASSIGNMENT [QUESTION]
 
-Run the autograder for the specified assignment and question on a single test
+Run the autograder for the specified quiz and question on a single test
 submission. It is intended for testing and debugging the autograder script and
 it does not affect the actual grades or feedback.
 
@@ -74,7 +74,7 @@ it does not affect the actual grades or feedback.
 
 ### chalk autograde list [ASSIGNMENT [QUESTION]]
 
-List all autograded questions in the specified assignment and display statistics
+List all autograded questions in the specified quiz and display statistics
 about the grading process.
 
 ## EXAMPLES

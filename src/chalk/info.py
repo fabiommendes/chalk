@@ -1,8 +1,7 @@
 import sys
 from typing import Any, Literal, cast
 
-from . import conf, roster
-from .core import Assignment, iter_assignments
+from .core import Classroom, Quiz
 from .data import StructuredFormat, dump_structured_data
 
 InfoFormat = Literal["console"] | StructuredFormat
@@ -10,32 +9,51 @@ InfoFormat = Literal["console"] | StructuredFormat
 
 def get_project_info() -> dict[str, Any]:
     """
-    Get global information about the Chalk project, including the roster and assignments.
+    Get global information about the Chalk project, including the roster and quizzes.
     """
-    cfg = conf.get_classroom()
-    students = roster.read_roster()  # noqa: F821
-    assignment_data: list[Assignment] = [loader() for id, loader in iter_assignments()]
+    cfg = Classroom.load()
+    students = cfg.get_roster()
+    quiz_data: list[Quiz] = [quiz for quiz in cfg.iter_quizzes()]
     return {
         "classroom": cfg.name,
         "teacher": cfg.teacher,
         "lang": cfg.lang,
         "students": len(students),
-        "assignments": [assignment.info() for assignment in assignment_data],
+        "quizzes": [quiz.info() for quiz in quiz_data],
     }
+
+
+def display_project_info(format: InfoFormat = "console") -> None:
+    """
+    Rich print the result of get_project_info().
+    """
+    info = get_project_info()
+
+    match format:
+        case "json" | "yaml":
+            dump_structured_data(info, format=format)
+            return
+        case "console":
+            pass
+        case _:
+            raise ValueError(f"Unsupported format: {format}")
+
+    # FIXME: pretty console print
+    dump_structured_data(info)
 
 
 def get_debug_info() -> dict[str, Any]:
     """
     Get debug information about the Chalk project, including environment variables and file paths.
     """
-    cfg = conf.get_classroom()
+    cfg = Classroom.load()
     return {
         "classroom": cfg.name,
         "teacher": cfg.teacher,
         "lang": cfg.lang,
         # "chalk_path": conf.get_chalk_path(),
         # "roster_path": conf.get_roster_path(),
-        # "assignments_path": conf.get_assignments_path(),
+        # "quizzes_path": conf.get_quizzes_path(),
         # "reports_path": conf.get_reports_path(),
     }
 
@@ -47,31 +65,9 @@ def get_version_info() -> dict[str, Any]:
     import chalk
 
     return {
-        "chalk_version": chalk.__version__,
-        "python_version": sys.version,
+        "chalk": chalk.__version__,
+        "python": sys.version,
     }
-
-
-def display_project_info(format: InfoFormat = "console") -> None:
-    """
-    Rich print the result of get_project_info().
-    """
-    info = get_project_info()
-
-    match format:
-        case "json":
-            dump_structured_data(info, format="json")
-            return
-        case "yaml":
-            dump_structured_data(info, format="yaml")
-            return
-        case "console":
-            pass
-        case _:
-            raise ValueError(f"Unsupported format: {format}")
-
-    # FIXME: pretty console print
-    dump_structured_data(info)
 
 
 def display_debug_info(format: InfoFormat = "console") -> None:

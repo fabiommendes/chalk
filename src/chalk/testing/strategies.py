@@ -6,13 +6,13 @@ from chalk.core import disqualification as dq
 
 student_id = st.from_regex(r"[a-zA-Z0-9-]{2,}", fullmatch=True)
 question_id = st.from_regex(r"q?[a-zA-Z0-9-]{2,4}", fullmatch=True)
-assignment_id = st.from_regex(r"q?[a-zA-Z0-9-]{2,4}", fullmatch=True)
+quiz_id = st.from_regex(r"q?[a-zA-Z0-9-]{2,4}", fullmatch=True)
 
 
 #
 # Grade-related strategies
 #
-_disqualification = st.sampled_from([dq.Timeout(), dq.Invalid()]) | student_id.map(
+_disqualification = st.sampled_from([dq.Timeout(), dq.InvalidInput()]) | student_id.map(
     dq.Plagiarism
 )
 

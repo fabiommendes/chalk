@@ -1,11 +1,51 @@
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 import rich
 import rich as _rich
 from rich.tree import Tree
 
 MAX_DEPTH = 2**32
+
+
+#
+# Helpers for __repr__ and __str__ methods of objects.
+#
+def pretty_repr(
+    obj: Any,
+    pos_args: Iterable[str] = (),
+    kwargs: Iterable[str] = (),
+    *,
+    keep_none: bool = False,
+    class_name: str | None = None,
+) -> str:
+    """
+    Generate a pretty string representation of an object, including its class name,
+    positional arguments, and keyword arguments.
+
+    Args:
+        obj: The object to represent.
+        pos_args: An iterable of strings representing the positional arguments.
+        kwargs: An iterable of strings representing the keyword arguments.
+        keep_none: Whether to include None values in the representation.
+        class_name: Optional class name to use in the representation. If None, the
+            object's class name will be used.
+
+    Returns:
+        A string representation of the object.
+    """
+    if class_name is None:
+        class_name = type(obj).__name__
+
+    args = []
+    for arg in pos_args:
+        value = getattr(obj, arg, None)
+        args.append(repr(value))
+    for arg in kwargs:
+        value = getattr(obj, arg, None)
+        if keep_none or value is not None:
+            args.append(f"{arg}={value!r}")
+    return f"{class_name}({', '.join(args)})"
 
 
 #

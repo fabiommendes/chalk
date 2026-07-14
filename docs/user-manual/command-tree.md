@@ -9,7 +9,7 @@ chalk
 │   ├── add
 │   ├── import
 │   └── validate
-├── assignment
+├── quiz
 │   ├── list
 │   ├── create
 │   ├── show
@@ -25,7 +25,7 @@ chalk
 │   ├── import
 │   └── export
 ├── grade
-│   ├── assignment
+│   ├── quiz
 │   ├── student
 │   ├── auto
 │   ├── manual
@@ -33,7 +33,7 @@ chalk
 │   └── report
 ├── report
 │   ├── class
-│   ├── assignment
+│   ├── quiz
 │   ├── student
 │   └── student-detail
 └── script

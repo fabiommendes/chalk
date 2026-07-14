@@ -10,19 +10,20 @@ from typing import (
     overload,
 )
 
+from ..data import serializers as s
 from ..protocols import JSON
-from ..util.decimal import format_decimal, get_decimal_context, normalize_decimal
 from ..util.parsing import read_parens
 from . import adjustment as adj
 from . import disqualification as dq
 from .adjustment import Adjustment
+from .decimal import as_chalk_decimal, get_decimal_context, render_decimal
 from .disqualification import Disqualification
 
 if TYPE_CHECKING:
     pass
 
 
-type Context = Literal["assignment", "question", "final"]
+type Context = Literal["quiz", "question", "final"]
 
 
 __all__ = ["Grade"]
@@ -35,7 +36,7 @@ class Grade:
 
     The context can include grade overrides, penalties, or disqualifications.
     The baseline grade value is what is considered the final grade for the
-    given assignment.
+    given quiz.
 
     A *disqualified* grade is usually not even considered for grading and is
     assigned a default value (usually 0) without even considering the actual
@@ -111,7 +112,7 @@ class Grade:
             msg = "A grade cannot have both an override and a disqualification."
             raise ValueError(msg)
 
-        value = normalize_decimal(Decimal(value, context=get_decimal_context()))
+        value = as_chalk_decimal(Decimal(value, context=get_decimal_context()))
         self._value = value
         self._adjustment = adj
         self._disqualification = disqualify
@@ -192,7 +193,7 @@ class Grade:
         """
         # Display disqualified grades
         if (disqualification := self._disqualification) is not None:
-            prefix = disqualification.display()
+            prefix = disqualification.render()
             if self._value == 0 and self._adjustment is None:
                 return prefix
             else:
@@ -202,16 +203,11 @@ class Grade:
         if (adjustment := self._adjustment) is not None:
             return adjustment.represent(self._value)
 
-        v = self._value
+        as_decimal = self._value
         if force_string:
-            return format_decimal(v)
+            return render_decimal(as_decimal)
 
-        if v.adjusted() >= 0:
-            return int(v)
-        elif (f := float(v)) == v:
-            return f
-        else:
-            return str(v)
+        return s.decimal(as_decimal)
 
     @classmethod
     def from_json(cls, data: JSON, /) -> Grade:

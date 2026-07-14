@@ -10,11 +10,11 @@ chalk script <script-name> <options>
 
 ## DESCRIPTION
 
-Executes an external script while passing assignment, student, and question context.
+Executes an external script while passing quiz, student, and question context.
 
 ## OPTIONS
 
-- -a, --assignment ASSIGNMENT_ID
+- -a, --quiz ASSIGNMENT_ID
 - -s, --student STUDENT_ID
 - -q, --question QUESTION_ID
 - --arg KEY=VALUE
@@ -25,7 +25,7 @@ Executes an external script while passing assignment, student, and question cont
 ## EXAMPLES
 
 ```bash
-chalk script grade_exam --assignment exam-01
+chalk script grade_exam --quiz exam-01
 ```
 
 ## EXIT STATUS

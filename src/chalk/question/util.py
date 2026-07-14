@@ -1,21 +1,8 @@
 from __future__ import annotations
 
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-)
+from typing import Callable
 
 import errorz as rz
-
-from ..types import QuestionId
-
-if TYPE_CHECKING:
-    from . import Question
-    from .base import BaseQuestion
-
-
-def question_id(question: Question | QuestionId) -> QuestionId:
-    return question.id if isinstance(question, BaseQuestion) else question
 
 
 def merge_errors[K, V, E](

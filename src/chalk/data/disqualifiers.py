@@ -6,12 +6,13 @@ from typing import Callable
 
 import opt
 
-from ..core import Disqualification, Response, StudentId, disqualification
+from ..core import Disqualification, StudentId, disqualification
+from ..question import AnyAnswer
 
-type ResponseValidator = Callable[[Response, StudentId], Disqualification | None]
-type ValidatorFn[T] = Callable[[T], Disqualification | None]
+type ResponseDisqualifier = Callable[[StudentId, AnyAnswer], Disqualification | None]
+type Disqualifier[T] = Callable[[T], Disqualification | None]
 
-VALIDATOR_REGISTRY: dict[str, ResponseValidator] = {}
+VALIDATOR_REGISTRY: dict[str, ResponseDisqualifier] = {}
 EXTENSION_MAPPINGS: dict[str, str] = {
     ".py": "python",
     ".js": "javascript",
@@ -21,12 +22,12 @@ log = getLogger(__name__)
 
 def register(
     name: str | None = None,
-) -> Callable[[ResponseValidator], ResponseValidator]:
+) -> Callable[[ResponseDisqualifier], ResponseDisqualifier]:
     """
     A decorator to register a validator function in the VALIDATOR_REGISTRY.
     """
 
-    def decorator(fn: ResponseValidator) -> ResponseValidator:
+    def decorator(fn: ResponseDisqualifier) -> ResponseDisqualifier:
         validator_name = name or fn.__name__
         VALIDATOR_REGISTRY[validator_name] = fn
         return fn
@@ -34,56 +35,53 @@ def register(
     return decorator
 
 
-def get_validator(name: str) -> ResponseValidator | None:
+def get_disqualifier(name: str) -> ResponseDisqualifier | None:
     """
     Get a validator function from the VALIDATOR_REGISTRY by name.
     """
     return VALIDATOR_REGISTRY.get(name)
 
 
-def get_validator_from_extension(suffix: str) -> ResponseValidator | None:
+def get_disqualifier_from_extension(suffix: str) -> ResponseDisqualifier | None:
     """
     Get a validator function based on the file extension of the answer file.
     """
     suffix = "." + suffix.lower().removeprefix(".")
-    return opt.map(get_validator, EXTENSION_MAPPINGS.get(suffix))
+    return opt.map(get_disqualifier, EXTENSION_MAPPINGS.get(suffix))
 
 
-def string_validator(
-    validator: Callable[[str], Disqualification | None],
-) -> ResponseValidator:
+def string_based(
+    disqualifier: Callable[[str], Disqualification | None],
+) -> ResponseDisqualifier:
     """
-    A helper function to create a ValidatorFn from a simple string validation function.
+    A helper function to create a ResponseDisqualifier from a simple string
+    disqualification function.
     """
 
-    def validator_fn(
-        response: Response, student_id: StudentId
-    ) -> Disqualification | None:
-        if (answer := response.answer) is None:
-            return None
+    def validator_fn(student_id: StudentId, answer: AnyAnswer) -> Disqualification | None:
         if isinstance(answer, str):
-            return validator(answer)
-        return disqualification.Invalid()
+            return disqualifier(answer)
+        return disqualification.InvalidInput()
 
-    validator_fn.__name__ = validator.__name__
+    validator_fn.__name__ = disqualifier.__name__
     return validator_fn
 
 
-def temp_file_validator(
+def temp_file_disqualifier(
     file_name: str,
-) -> Callable[[ValidatorFn[Path]], ResponseValidator]:
+) -> Callable[[Disqualifier[Path]], ResponseDisqualifier]:
     """
-    A helper function to create a ValidatorFn from a validation function that
+    A helper function to create a ResponseDisqualifier from a disqualification function that
     operates on a temporary file.
 
     This is useful to wrap external tools like compilers, linters, etc. that
-    expect file input. The file is automatically cleaned up after the validator
+    expect file input. The file is automatically cleaned up after the disqualifier
     function is called.
     """
 
-    def decorator(validator: ValidatorFn[Path]) -> ResponseValidator:
-        @string_validator
-        def validator_fn(code: str) -> Disqualification | None:
+    def decorator(disqualifier: Disqualifier[Path]) -> ResponseDisqualifier:
+        @string_based
+        def disqualifier_fn(code: str) -> Disqualification | None:
             prefix, sep, suffix = file_name.partition(".")
             suffix = sep + suffix if sep else ""
 
@@ -95,10 +93,10 @@ def temp_file_validator(
             ) as tmp_file:
                 tmp_file.write(code)
                 tmp_file.flush()
-                return validator(Path(tmp_file.name))
+                return disqualifier(Path(tmp_file.name))
 
-        validator_fn.__name__ = validator.__name__
-        return validator_fn
+        disqualifier_fn.__name__ = disqualifier.__name__
+        return disqualifier_fn
 
     return decorator
 
@@ -108,7 +106,7 @@ def temp_file_validator(
 # ==============================================================================
 @register("python")
 @register("py")
-@string_validator
+@string_based
 def python_syntax_validator(code: str) -> Disqualification | None:
     """
     Ensure that the response contains valid Python code.
@@ -117,14 +115,14 @@ def python_syntax_validator(code: str) -> Disqualification | None:
     try:
         compile(code, "<string>", "exec")
     except SyntaxError:
-        return disqualification.Invalid()
+        return disqualification.InvalidInput()
 
     return None
 
 
 @register("js")
 @register("javascript")
-@temp_file_validator("script.js")
+@temp_file_disqualifier("script.js")
 def javascript_syntax_validator(
     path: Path,
 ) -> Disqualification | None:
@@ -141,6 +139,6 @@ def javascript_syntax_validator(
         )
         log.debug(f"node: {result.stdout}")
     except subprocess.SubprocessError:
-        return disqualification.Invalid()
+        return disqualification.InvalidInput()
 
     return None

@@ -2,7 +2,7 @@ Chalk classroom manager
 =======================
 
 Chalk is a CLI tool for classroom management. It helps teachers manage
-assignments, students, and grades. Chalk is a CLI-based tool that assumes that
+quizzes, students, and grades. Chalk is a CLI-based tool that assumes that
 information is better stored in local text files instead of a complex opaque
 database.
 
@@ -45,7 +45,7 @@ Directory Structure
 
 Chalk organizes its data in a simple directory structure. Each classroom is
 stored in a separate directory, which contains text files for students,
-assignments and grades. A basic structure looks like this:
+quizzes and grades. A basic structure looks like this:
 
 ```
 classroom/
@@ -77,9 +77,9 @@ Basic commands
 
 - `chalk init`: Initializes a new classroom.
 - `chalk add -is <student_id>`: Adds a new student to the roster.
-- `chalk add -ia <assignment_name>`: Adds a new assignment to the classroom.
-- `chalk grade -is <student_id>`: Assigns a grade to a student for a specific assignment.
-- `chalk report -a <assignment_name>`: Generates a report for a specific assignment.
+- `chalk add -ia <quiz_name>`: Adds a new quiz to the classroom.
+- `chalk grade -is <student_id>`: Assigns a grade to a student for a specific quiz.
+- `chalk report -a <quiz_name>`: Generates a report for a specific quiz.
 - `chalk report -s <student_id>`: Generates a report for a specific student.
 
 
@@ -119,10 +119,10 @@ The columns `name` and `id` are required. Additional optional columns are:
 - `email_alt`: The student's alternative email address
 
 
-### Simple assignments
+### Simple quizzes
 
-A simple assignment store all information (including grades and submission data)
-in a single file. The example below shows a simple assignment in YAML.
+A simple quiz store all information (including grades and submission data)
+in a single file. The example below shows a simple quiz in YAML.
 
 ```yaml
 name: "Midterm Exam"

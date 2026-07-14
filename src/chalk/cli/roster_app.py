@@ -3,15 +3,19 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Annotated
+from weakref import proxy
 
 import rich
 import typer
 from rich.prompt import Prompt
 
+from chalk.core import Classroom
+
 from .. import env
 from .. import table as tb
-from ..core import Assignment, Student, StudentId, SystemError
-from ..roster import ConflictMode, Roster, read_roster, read_roster_like
+from ..core import Quiz, Student, StudentId
+from ..core.roster import ConflictMode, Roster, read_roster_like
+from ..util import clean_data
 from .util import safe
 
 app = typer.Typer(help="Manage the student roster.", no_args_is_help=True)
@@ -58,7 +62,8 @@ def show(
     Show the current student roster.
     """
 
-    roster = read_roster()
+    cls = Classroom.load()
+    roster = cls.get_roster()
     table = roster.table()
 
     reverse = False
@@ -69,7 +74,7 @@ def show(
         if sort.startswith("+"):
             sort = sort[1:]
 
-    if sort and sort not in Student.FIELDS:
+    if sort and sort != "id" and sort not in table.columns:
         rich.print(f"[b red]Invalid sort column: {sort}[/]", file=sys.stderr)
         raise SystemExit(1)
 
@@ -131,16 +136,21 @@ def add(
     """
     Add one student to the roster.
     """
-
-    roster = read_roster()
+    cls = Classroom.load()
+    roster = cls.get_roster()
     if student_id is not None:
         student = Student(
             id=student_id,
             name=env.ask_optional_string("Name", name, default=student_id),
-            email=env.ask_optional_string("Email", email),
-            email_alt=env.ask_optional_string("Alternative email", email_alt),
-            github=env.ask_optional_string("GitHub", github),
-        )
+            classroom=proxy(cls),
+            **clean_data(
+                {
+                    "email": env.ask_optional_string("Email", email),
+                    "email_alt": env.ask_optional_string("Alternative email", email_alt), 
+                    "github": env.ask_optional_string("GitHub", github),
+                }
+            ),
+        )  # fmt: skip
         roster.add_students([student])
         return
 
@@ -157,9 +167,14 @@ def add(
         student = Student(
             id=student_id,
             name=env.ask_optional_string("Name", name, default=student_id),
-            github=env.ask_optional_string("GitHub", github),
-            email=env.ask_optional_string("Email", email),
-            email_alt=env.ask_optional_string("Alternative email", email_alt),
+            classroom=proxy(cls),
+            **clean_data(
+                {
+                    "email": env.ask_optional_string("Email", email),
+                    "email_alt": env.ask_optional_string("Alternative email", email_alt),
+                    "github": env.ask_optional_string("GitHub", github),
+                }
+            ),
         )
         roster.add_students([student])
         print()
@@ -199,10 +214,11 @@ def import_roster(
     """
 
     if replace and keep:
-        raise SystemError.INVALID_FIELD("Cannot use --replace and --keep together")
+        raise SystemExit("Cannot use --replace and --keep together")
 
-    imported = read_roster_like(path)
-    existing = read_roster()
+    cls = Classroom.load()
+    imported = read_roster_like(path, cls)
+    existing = cls.get_roster()
     students = list(imported.data.values())
 
     mode: ConflictMode = "replace" if replace else "keep" if keep else "merge"
@@ -231,14 +247,14 @@ def validate(
             help="Comma-separated required fields",
         ),
     ] = None,
-    assignment_id: Annotated[
+    quiz_id: Annotated[
         str | None,
         typer.Option(
             ...,
             "-a",
-            "--assignment",
+            "--quiz",
             metavar="ASSIGNMENT",
-            help="Validate that all students have submissions for the specified assignment",
+            help="Validate that all students have submissions for the specified quiz",
         ),
     ] = None,
     yes: Annotated[
@@ -252,12 +268,13 @@ def validate(
 ) -> None:
     """Validate roster data for consistency and completeness."""
 
-    roster = read_roster()
+    cls = Classroom.load()
+    roster = cls.get_roster()
 
     # If yes/no is set, but no other option is provided.
-    if not id and not fields and not assignment_id:
+    if not id and not fields and not quiz_id:
         rich.print(
-            "[b red]Nothing to validate! Use --id, --fields, or --assignment.[/]",
+            "[b red]Nothing to validate! Use --id, --fields, or --quiz.[/]",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -267,28 +284,19 @@ def validate(
 
     if fields:
         field_list = {field.strip() for field in fields.split(",") if field.strip()}
-
-        if extra := (field_list - Student.FIELDS):
-            extra_names = ", ".join(sorted(extra))
-            msg = f"[b red]Invalid field(s): {extra_names}.[/]\nValid fields are id, name, email, email_alt, github."
-            rich.print(msg, file=sys.stderr)
-            raise SystemExit(1)
-
         validate_fields(roster, field_list)
 
-    if assignment_id:
-        assignment = Assignment.load(id=assignment_id)
-        validate_assignment(roster, assignment)
+    if quiz_id:
+        quiz = cls.get_quiz(quiz_id)
+        if quiz is None:
+            raise SystemExit(f"[b red]Quiz {quiz_id} not found in classroom[/]")
+        validate_quiz(roster, quiz)
 
 
-def validate_ids(
-    roster: Roster, pattern: str, force_remove: bool | None = None
-) -> None:
+def validate_ids(roster: Roster, pattern: str, force_remove: bool | None = None) -> None:
     id_pattern = re.compile(pattern)
     invalid_ids = [
-        student.id
-        for student in roster.data.values()
-        if not id_pattern.fullmatch(student.id)
+        student.id for student in roster.data.values() if not id_pattern.fullmatch(student.id)
     ]
 
     if not invalid_ids:
@@ -303,9 +311,7 @@ def validate_ids(
     if force_remove is not None:
         action = "all" if force_remove else "none"
     else:
-        action = Prompt.ask(
-            "Remove them?", choices=["ask", "all", "none"], default="ask"
-        )
+        action = Prompt.ask("Remove them?", choices=["ask", "all", "none"], default="ask")
 
     # Perform action
     if action == "ask":
@@ -345,21 +351,21 @@ def validate_fields(roster: Roster, fields: set[str]) -> None:
         raise SystemExit(1)
 
 
-def validate_assignment(roster: Roster, assignment: Assignment) -> None:
-    submissions = set(assignment.submissions or [])
+def validate_quiz(roster: Roster, quiz: Quiz) -> None:
+    submissions = quiz.submissions
     student_ids = set(roster.data.keys())
 
     missing = student_ids - submissions
     extra = submissions - student_ids
 
     if missing:
-        rich.print(f"Missing submissions for [b red]{assignment.id}[/]")
+        rich.print(f"Missing submissions for [b red]{quiz.id}[/]")
         for student_id in missing:
             student = roster[student_id]
             rich.print(f"- [bold]{student_id}[/] ({student.name})")
 
     if extra:
-        rich.print(f"Submissions from unknown students for [b red]{assignment.id}[/]")
+        rich.print(f"Submissions from unknown students for [b red]{quiz.id}[/]")
         for student_id in extra:
             rich.print(f"- [bold]{student_id}[/]")
 
@@ -370,7 +376,11 @@ def validate_assignment(roster: Roster, assignment: Assignment) -> None:
         )
         if prompt == "y":
             for student_id in extra:
-                roster.data[student_id] = Student(id=student_id, name="auto")
+                roster.data[student_id] = Student(
+                    id=student_id,
+                    name="auto",
+                    classroom=quiz.classroom,
+                )
             roster.save()
 
     if missing or extra:
