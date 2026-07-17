@@ -17,7 +17,6 @@ dependencies = [
     "pandas>=3.0.3",
     "pandas-stubs>=3.0.0.260204",
     "pandera[pandas]>=0.31.1",
-    "plagiarism",
     "pydantic>=2.13.4",
     "pygments>=2.20.0",
     "pyyaml>=6.0.3",
@@ -61,11 +60,6 @@ docs-serve = { cmd = "uv run mkdocs serve", help = "Serve HTML documentation wit
 test = "pytest tests"
 lint = "ruff check ."
 build = "uv build"
-
-[tool.uv.sources]
-plagiarism = { path = "../plagiarism", editable = true }
-optionz = { path = "../optionz", editable = true }
-resultz = { path = "../resultz", editable = true }
 
 [tool.uv.build-backend]
 module-name = "chalk"

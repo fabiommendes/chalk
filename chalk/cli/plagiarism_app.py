@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 from typing import Annotated, Mapping
 
 import rich
 import typer
-from plagiarism.pairwise import Match, Pairwise, tokens
 from rich.prompt import Prompt
 from rich.table import Table
 
@@ -38,6 +39,8 @@ def scan(
     """
     Scan for plagiarism in the given quiz and question.
     """
+    from plagiarism.pairwise import Pairwise, tokens
+
     _, question, responses = read_quiz_question_and_responses(
         quiz_id, question_id, validate=True, skip_empty=True
     )
