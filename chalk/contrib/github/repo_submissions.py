@@ -60,12 +60,17 @@ def main(
     Create the corresponding columns in the submissions.csv file for all
     student submissions in the given repositories.
     """
+    path = path.resolve()
     if not path.exists():
-        raise typer.BadParameter(f"Path does not exist: {path.relative_to(Path.cwd())}")
+        raise typer.BadParameter(
+            f"Path does not exist: {path.relative_to(Path.cwd(), walk_up=True)}"
+        )
     if not path.is_dir():
-        raise typer.BadParameter(f"Path is not a directory: {path.relative_to(Path.cwd())}")
+        raise typer.BadParameter(
+            f"Path is not a directory: {path.relative_to(Path.cwd(), walk_up=True)}"
+        )
     if not path.name.endswith("-submissions"):
-        msg = f"Path is not a submissions directory: {path.relative_to(Path.cwd())}"
+        msg = f"Path is not a submissions directory: {path.relative_to(Path.cwd(), walk_up=True)}"
         msg += "\n\nAre you sure you created it using the [b]gh classroom clone student-repos[/] command?"
         msg += "\nPath should end with the suffix '-submissions'."
         raise typer.BadParameter(msg)

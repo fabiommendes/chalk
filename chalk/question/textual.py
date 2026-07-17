@@ -16,6 +16,11 @@ from .base import (
 )
 from .renderable import RenderableField
 
+# Mapping between formats and extensions when we diverge from pygments
+FORMAT_EXTENSION_OVERRIDES = {
+    "prolog": "pl",
+}
+
 
 class Textual(BaseQuestion[models.Textual, TextualAnswer]):
     """
@@ -54,7 +59,13 @@ class Textual(BaseQuestion[models.Textual, TextualAnswer]):
         Render the question as a string.
         """
         if self.format is not None and self.format in syntax_highlight_formats() and not plain:
-            return Syntax(answer, self.format, line_numbers=True, theme="monokai")
+            return Syntax(
+                answer,
+                self.format,
+                line_numbers=self.format != "text",
+                theme="monokai",
+                word_wrap=True,
+            )
         else:
             return answer
 
@@ -109,6 +120,7 @@ def syntax_highlight_suffixes() -> dict[str, str]:
         for name in names:
             mapping[name] = suffix
     mapping["text"] = "txt"
+    mapping.update(FORMAT_EXTENSION_OVERRIDES)
     return mapping
 
 

@@ -39,7 +39,7 @@ class MultipleSelection(ChoiceQuestionBase[models.MultipleSelection, MultipleSel
 
     def validate_answer(self, answer: AnyAnswer | str) -> MultipleSelectionAnswer:
         if isinstance(answer, str):
-            answer = [a.strip() for a in answer.split(";")]
+            ans = [a.strip() for a in answer.split(";")]
 
         choice_ids = validate_choice_ids(answer)
 

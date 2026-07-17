@@ -71,13 +71,13 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def yn_prompt(message: str, default: Literal["y", "n", "never"] = "y") -> bool | None:
-    match Prompt.ask(message, choices=["y", "n", "never"], default=default):
+def yn_prompt(message: str, default: Literal["y", "n", "N"] = "y") -> bool | None:
+    match Prompt.ask(message, choices=["y", "n", "N"], default=default):
         case "y":
             return True
         case "n":
             return False
-        case "never":
+        case "N":
             return None
         case _:
             raise RuntimeError("Invalid choice")

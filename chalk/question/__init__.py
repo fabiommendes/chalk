@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, TypeIs, assert_never
+from typing import TYPE_CHECKING, Any, Literal, TypeIs, assert_never, cast
 
 from rich.console import Group, RenderableType
 from rich.text import Text
@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from chalk.core import Quiz, models
 
 from ..core.answer import AnyAnswer
-from ..core.answer import serialize_answer as _serialize_answer
+from ..core.answer import serialize_any_answer as _serialize_answer
 from .association import Association
 from .base import Generic
 from .fillin import FillIn
@@ -37,7 +37,7 @@ def load_question(id: models.QuestionId, conf: models.Question, /, quiz: Quiz) -
     """
     match conf.type:
         case None:
-            return Generic(id, conf, quiz=quiz)
+            return Generic(id, cast(models.GenericQuestion, conf), quiz=quiz)
         case "textual":
             return Textual(id, conf, quiz=quiz)
         case "multiple-choice":
@@ -91,6 +91,8 @@ def serialize_answer(
     """
     if answer is None:
         return ""
+    if error == "ignore" and isinstance(answer, str):
+        return answer
 
     try:
         validated: Any = question.validate_answer(answer)

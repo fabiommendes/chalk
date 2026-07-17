@@ -80,6 +80,7 @@ def display_field(name: str, value: Any, rich: bool = True) -> None:
 #
 def print_file_tree(
     path: Path,
+    *,
     pred: Callable[[Path], bool] = lambda p: _show_file(p),
     depth: int = MAX_DEPTH,
     root_label: str = "/",
@@ -89,13 +90,33 @@ def print_file_tree(
     Print the file tree starting at the given path, using rich to render the tree.
     """
 
-    rich.print(
-        _generate_branches(
-            path,
-            Tree(f"[bold blue]{root_label}", guide_style="grey50", hide_root=hide_root),
-            pred=pred,
-            depth=depth,
-        )
+    tree = render_file_tree(
+        path,
+        pred=pred,
+        depth=depth,
+        root_label=root_label,
+        hide_root=hide_root,
+    )
+    rich.print(tree)
+
+
+def render_file_tree(
+    path: Path,
+    *,
+    pred: Callable[[Path], bool] = lambda p: _show_file(p),
+    depth: int = MAX_DEPTH,
+    root_label: str = "/",
+    hide_root: bool = False,
+) -> Tree:
+    """
+    Render the file tree starting at the given path, using rich to create the tree structure.
+    """
+
+    return _generate_branches(
+        path,
+        Tree(f"[bold blue]{root_label}", guide_style="grey50", hide_root=hide_root),
+        pred=pred,
+        depth=depth,
     )
 
 

@@ -1,17 +1,16 @@
 import datetime
 import sys
 from decimal import Decimal
-from pathlib import Path
 from typing import Annotated, Iterable
 
 import opt
 import rich
 import typer
 
-from ..core import Classroom, Grade, Quiz, models
+from ..core import Classroom, Quiz, models
 from ..core.decimal import as_chalk_decimal, render_decimal
 from ..env import ask_optional_string
-from ..table import Table, validate_table_format
+from ..table import Table
 from .util import safe
 
 app = typer.Typer(help="Manage the student roster.", no_args_is_help=True)
@@ -155,95 +154,6 @@ def create(
 
 
 # ==============================================================================
-# chalk quiz show ID
-# ==============================================================================
-@app.command(name="show")
-@safe
-def show(
-    quiz_id: Annotated[
-        str | None,
-        typer.Argument(
-            ...,
-            help="Quiz identifier (e.g. 'hw1', 'exam1', etc.)",
-        ),
-    ] = None,
-    grades: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            "-g",
-            "--grades",
-            help="Show all grades for the quiz.",
-        ),
-    ] = False,
-    missing: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            "-m",
-            "--missing",
-            help="Show which students have not submitted the quiz.",
-        ),
-    ] = False,
-    sort: Annotated[
-        str,
-        typer.Option(
-            ...,
-            "-s",
-            "--sort",
-            help="Sort by id, name, start, or end",
-            metavar="COLUMN",
-        ),
-    ] = "id",
-    output_format: Annotated[
-        str | None,
-        typer.Option(
-            ...,
-            "-f",
-            "--format",
-            metavar="FORMAT",
-            help="Specify the output format (e.g. 'table', 'json', etc.)",
-        ),
-    ] = None,
-    output_path: Annotated[
-        Path | None,
-        typer.Option(
-            ...,
-            "-o",
-            "--output",
-            metavar="PATH",
-            help="Specify a file to save the output to",
-        ),
-    ] = None,
-) -> None:
-    """
-    Show details of a quiz.
-    """
-    cfg = Classroom.load()
-    quiz = cfg.prompt_quiz(quiz_id)
-
-    if not missing and not grades:
-        quiz.dump(
-            output_path,
-            format=opt.map(validate_table_format, output_format),
-        )
-    elif grades:
-        table = Table.from_dataframe(quiz.grades.get_dataframe(total="total"))
-        table.dump(
-            output_path,
-            format=opt.map(validate_table_format, output_format),
-            styles={"id": "bold yellow", "total": "bold"},
-            sort=sort,
-            last_row={
-                "id": "mean",
-                "total": render_mean(table.get_column("total")),
-            },
-        )
-    elif missing:
-        raise NotImplementedError("Missing submission report is not yet implemented")
-
-
-# ==============================================================================
 # chalk quiz merge ID1 ID2
 # ==============================================================================
 @app.command(name="merge")
@@ -293,7 +203,7 @@ def merge(
 #
 # Utilities
 #
-def render_mean(data: Iterable[Decimal | Grade | None]) -> str | None:
+def render_mean(data: Iterable[Decimal | None]) -> str | None:
     filtered = opt.filter(data)
     numbers = list(map(as_chalk_decimal, filtered))  # type: ignore
     if (n := len(numbers)) == 0:

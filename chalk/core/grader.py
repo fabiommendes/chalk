@@ -24,8 +24,8 @@ __all__ = [
     # Constants
     "DEFAULT_TIMEOUT",
     # Grader combinators
-    "FixedGrader",
-    "Merged",
+    "Fixed",
+    "Compose",
 ]
 
 DEFAULT_TIMEOUT = 30.0
@@ -97,6 +97,7 @@ class GraderKwargs(TypedDict, total=False):
     timeout: float
     keep_files: bool
     keep_failed: bool
+    capture_output: bool
     on_output_line: Callable[[str], None]
 
 
@@ -117,7 +118,7 @@ class Grader[Answer](Protocol):
 
 
 @dataclass(frozen=True)
-class FixedGrader(Grader[Any]):
+class Fixed(Grader[Any]):
     """
     The fixed grader always returns the same score and feedback.
     """
@@ -136,7 +137,7 @@ class FixedGrader(Grader[Any]):
 
 
 @dataclass(frozen=True)
-class Merged[T](Grader[T]):
+class Compose[T](Grader[T]):
     """
     Combines multiple graders and returns the combination of all grading outcomes.
     """

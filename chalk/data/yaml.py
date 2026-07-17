@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import IO, Any
 
 import yaml
+from frozendict import frozendict
 
 from ..util.sequence import find_path
 from . import serializers as s
@@ -102,5 +103,10 @@ def decimal_representer(dumper: yaml.SafeDumper, data: Decimal) -> yaml.Node:
         raise ValueError(f"Cannot represent Decimal {data} as YAML: {value!r}")
 
 
+def frozendict_representer(dumper: yaml.SafeDumper, data: frozendict) -> yaml.Node:
+    return dumper.represent_dict(dict(data))
+
+
 SafeDumper.add_representer(str, string_representer)
 SafeDumper.add_representer(Decimal, decimal_representer)
+SafeDumper.add_representer(frozendict, frozendict_representer)

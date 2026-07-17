@@ -24,7 +24,7 @@ import opt
 from pydantic import Field
 
 from ..core import models
-from ..core.answer import serialize_answer
+from ..core.answer import serialize_any_answer
 from ..core.grader import Graded, Grader
 from ..core.issue import Issue, IssueLevel, IssueLevelLike, list_of_issues
 from ..core.models import AnyAnswer, Autograder, QuestionId, QuestionType, StudentId
@@ -32,6 +32,7 @@ from ..data import json, yaml
 from .renderable import RenderableQuestion
 
 if TYPE_CHECKING:
+    from ..core.classroom import Classroom
     from ..core.quiz import Quiz
     from ..question import Question
 
@@ -68,6 +69,18 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
     def name(self) -> str:
         return self._conf.name or self.id
 
+    @name.setter
+    def name(self, value: str) -> None:
+        self._conf.name = value
+
+    @property
+    def stem(self) -> str | None:
+        return self._conf.stem
+
+    @stem.setter
+    def stem(self, value: str | None) -> None:
+        self._conf.stem = value
+
     @property
     def value(self) -> Decimal:
         return self._conf.value or Decimal(1)
@@ -96,6 +109,10 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
         )
 
     @property
+    def classroom(self) -> Classroom:
+        return self.quiz.classroom
+
+    @property
     def answer_suffix(self) -> str | None:
         return self.get_answer_extension()
 
@@ -116,6 +133,9 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
         self._conf = conf
         self._id = id
         self._quiz = ref(quiz)
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} {self.quiz.id}/{self.id}>"
 
     #
     # Getter functions
@@ -142,24 +162,54 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
 
         return path
 
+    def get_responses_root(self, mkdir: bool = False, check: bool = False) -> Path:
+        """
+        Get the root path to where store answer files if the answers are to
+        be stored in separate files.
+
+        This is typically <quiz-root>/<question-id>/responses.
+        """
+        path = self.root / "responses"
+
+        if path.exists() and not path.is_dir():
+            msg = f"Responses path is not a directory: {path}"
+            raise NotADirectoryError(msg)
+        if mkdir:
+            path.mkdir(parents=True, exist_ok=True)
+        elif check and not path.exists():
+            msg = f"Responses path does not exist: {path}"
+            raise FileNotFoundError(msg)
+
+        return path
+
     def get_persisted_answer(self, student_id: StudentId) -> Answer | None:
         """
-        Read the answer from a local file
+        Read the answer from a local file, if it exists.
+
+        It **DOES NOT** interact with the submissions.csv file, it only reads
+        the answer from a file if it is in the question's responses directory.
         """
-        if not self.root.exists():
+        root = self.get_responses_root(mkdir=False)
+        if not root.exists():
             return None
 
-        if (suffix := self.get_answer_extension()) is not None:
-            path = self.root / "responses" / f"{student_id}.{suffix.removeprefix('.')}"
-            if not path.exists():
-                return None
-            return self.validate_answer(path.read_text())
+        suffix = self.get_answer_suffix()
+        path = root / f"{student_id}{suffix}"
+        if not path.exists():
+            return None
+        return self.validate_answer(path.read_text())
 
-        return opt.pipe(
-            opt.single(self.root.glob(f"responses/{student_id}.*")),
-            Path.read_text,
-            self.validate_answer,
-        )
+    def persist_answer(self, student_id: StudentId, answer: Answer) -> None:
+        """
+        Persist the answer to a local file.
+
+        This **DOES NOT** update the submissions.csv file, it only writes the answer
+        to a file in the question's responses directory.
+        """
+        root = self.get_responses_root(mkdir=True)
+        suffix = self.get_answer_suffix()
+        path = root / f"{student_id}{suffix}"
+        path.write_text(self.serialize_answer(answer))
 
     @overload
     def get_answer_extension(self, default: str) -> str: ...
@@ -178,6 +228,15 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             lambda s: s.removeprefix("."),
             opt.unwrap(self._conf.answer_suffix, default),
         )
+
+    def get_answer_suffix(self):
+        """
+        Get the suffix for answer files for this question, if any.
+
+        This is used to determine the file type of answer files when reading
+        them from disk.
+        """
+        return "." + (self.get_answer_extension() or "txt")
 
     def get_autograder(self) -> Autograder:
         """
@@ -255,8 +314,8 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
         Raises:
             ValueError if the answer key exists, but its content is invalid.
         """
-        ext = self.get_answer_extension("txt")
-        path = self.root / f"answer_key.{ext}"
+        ext = self.get_answer_suffix()
+        path = self.root / f"answer_key{ext}"
         if path.exists():
             src = path.read_text()
             return self.validate_answer(src)
@@ -273,8 +332,8 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             return {}
 
         templates = {}
-        ext = self.get_answer_extension(default="txt")
-        for path in base.glob(f"*.{ext}"):
+        ext = self.get_answer_suffix()
+        for path in base.glob(f"*{ext}"):
             templates[path.stem] = self.validate_answer(path.read_text())
         return templates
 
@@ -320,7 +379,7 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
         """
         Convert the given answer to a string representation.
         """
-        return serialize_answer(answer)
+        return serialize_any_answer(answer)
 
     @final
     def validate_question(
@@ -532,7 +591,7 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
         return []
 
 
-class Generic(BaseQuestion):
+class Generic(BaseQuestion[models.GenericQuestion, AnyAnswer]):
     """
     A question with no specific assigned format.
     """
@@ -540,8 +599,8 @@ class Generic(BaseQuestion):
     def get_grader(self) -> Grader[Any] | None:
         return None
 
-    def validate_answer(self, answer: AnyAnswer) -> rz.Result[Any, list[Issue]]:
-        return rz.ok(answer)
+    def validate_answer(self, answer: AnyAnswer) -> AnyAnswer:
+        return answer
 
 
 def ensure_scope(scope: QuestionScope, issues: Iterable[Issue]) -> Iterable[Issue]:

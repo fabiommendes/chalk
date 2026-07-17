@@ -38,6 +38,7 @@ class ScriptGrader(Grader[str | Path]):
         keep_files: bool = False,
         keep_failed: bool = False,
         on_output_line: Callable[[str], None] | None = None,
+        capture_output: bool = True,
         **kwargs,
     ) -> Graded | None:
 
@@ -65,6 +66,7 @@ class ScriptGrader(Grader[str | Path]):
                 ),
                 timeout=timeout,
                 on_output_line=on_output_line,
+                capture_output=capture_output,
             )
             result = runner.run()
 
@@ -93,24 +95,57 @@ class ScriptGrader(Grader[str | Path]):
         repo = Repo(Path(tmp_dir.name))
 
         try:
-            if (template := self.question.get_template_path()) is not None:
-                repo.copy_tree(template)
+            template = self.question.get_template_path()
+            student_repo = answer if isinstance(answer, Path) and answer.is_dir() else None
+
+            answer_content = None
+            if isinstance(answer, Path) and answer.is_file():
+                answer_content = answer.read_bytes()
+            elif isinstance(answer, str):
+                answer_content = answer.encode("utf-8")
+
+            if template or student_repo:
+                repo.sync_template(template=template, student_repo=student_repo, copy_mode="link")
                 log.debug(f"Copied template repository for {student_id}")
 
-            if isinstance(answer, str):
-                repo.write_file(self._answer_path(), answer)
-            elif isinstance(answer, Path) and answer.is_file():
-                repo.write_file(self._answer_path(), answer.read_bytes())
-            else:
-                repo.copy_tree(answer)
+            repo.write_file(
+                "chalk.info",
+                self.chalk_info(
+                    pwd=str(repo.root),
+                    student_id=student_id,
+                    template_path=str(template) if template else "<none>",
+                    student_repo_path=str(student_repo) if student_repo else "<none>",
+                    answer_content="<provided>" if answer_content is not None else "<none>",
+                    answer_size=f"{len(answer_content) // 1024} kb"
+                    if answer_content is not None
+                    else "0",
+                ),
+            )
 
-            log.debug(f"Copied answer for {student_id}")
+            if answer_content is not None:
+                repo.write_file(self._answer_path(), answer_content)
+                log.debug(f"Copied answer for {student_id}")
 
             yield repo
         finally:
             if clear:
                 repo.clear_all()
                 log.debug(f"Cleared repository for {student_id}")
+
+    def chalk_info(self, **kwargs: str) -> str:
+        """
+        Generate a chalk.info file for the student repository.
+        """
+        info = {
+            "question_id": self.question.id,
+            "quiz_id": self.question.quiz.id,
+            "answer_path": self._answer_path(),
+            **kwargs,
+        }
+        lines = ["Chalk Info:"]
+        lines.extend(f"  {key}: {value}" for key, value in info.items())
+
+        return "\n".join(lines)
 
     def _answer_path(self) -> str:
         return str(self.conf.answer or "answer.txt")

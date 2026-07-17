@@ -1,12 +1,13 @@
 from .. import question
 from ..question import Question
 from . import disqualification, models
-from .answer import AnyAnswer, validate_answer
+from .answer import AnyAnswer, validate_any_answer
 from .classroom import Classroom
 from .disqualification import Disqualification
 from .error import ChalkError, ChalkErrorEnum
 from .models import QuestionId, QuestionType, QuizId, StudentId
 from .quiz import Quiz
+from .score import BoundScore, Score
 from .student import Student
 
 INVALID_ASSIGNMENT_NAMES = {
@@ -23,8 +24,10 @@ __all__ = [
     "ChalkError",
     "ChalkErrorEnum",
     "Classroom",
+    "BoundScore",
     "disqualification",
     "Disqualification",
+    "Score",
     "models",
     "question",
     "Question",
@@ -34,10 +37,8 @@ __all__ = [
     "QuizId",
     "Student",
     "StudentId",
-    "validate_answer",
+    "validate_any_answer",
     "validate_quiz_id",
-    # "Response",
-    # "Submission",
 ]
 
 

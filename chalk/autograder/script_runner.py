@@ -5,9 +5,7 @@ import pty
 import re
 import subprocess
 import sys
-import threading
 import time
-from collections import deque
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
@@ -16,7 +14,7 @@ from typing import Any, Callable
 from chalk.core import disqualification as dq
 
 from ..core import Disqualification, QuestionId, QuizId, StudentId
-from ..core.answer import AnyAnswer, serialize_answer
+from ..core.answer import AnyAnswer, serialize_any_answer
 from ..core.grader import Graded
 from ..core.score import Score
 from .repo import Repo
@@ -60,6 +58,7 @@ class ScriptRunner:
         env: ChalkEnv,
         timeout: float,
         on_output_line: Callable[[str], Any] | None = None,
+        capture_output: bool = True,
     ) -> None:
         self._chalk_env = env
         self.timeout = timeout
@@ -76,14 +75,15 @@ class ScriptRunner:
         #     raise OSError(f"Script is not executable: {script_path}")
 
         self._master_pty_fd, self._slave_pty_fd = pty.openpty()
+        self.capture_output = capture_output
 
         self.process = subprocess.Popen(
             self._get_shell_command(script_path),
             shell=True,
             cwd=repo.root,
             env=self._chalk_env.to_env_dict(repo.root),
-            stdout=self._slave_pty_fd,
-            stderr=self._slave_pty_fd,
+            stdout=self._slave_pty_fd if capture_output else None,
+            stderr=self._slave_pty_fd if capture_output else None,
             stdin=subprocess.DEVNULL,
         )
 
@@ -97,68 +97,11 @@ class ScriptRunner:
         if self._result is not None:
             return self._result
 
-        deadline = (self.timeout or float("inf")) + time.time()
-        process = self.process
-        output_lines = []
-
-        timeout = False
-        dt = 0.025
-        buf: bytes = b""
-        lines: deque[bytes] = deque()
-
-        def worker():
-            nonlocal buf
-            try:
-                data = os.read(self._master_pty_fd, 1024)
-            except OSError:
-                if buf:
-                    lines.appendleft(buf)
-                buf = b""
-            else:
-                buf = b""
-                endline = data.endswith(b"\n")
-                read_lines = data.splitlines()
-                read_lines[0] = buf + read_lines[0]
-                if not endline:
-                    buf = read_lines.pop()
-                for line in reversed(read_lines):
-                    lines.appendleft(line)
-
-        def consume():
-            while lines:
-                line = lines.pop().removesuffix(b"\r").decode(errors="replace")
-                output_lines.append(line)
-                self._on_output_line(line)
-
-        while process.poll() is None:
-            time.sleep(dt)
-            while True:
-                thread = threading.Thread(target=worker)
-                thread.start()
-                try:
-                    thread.join(timeout=deadline - time.time())
-                except TimeoutError:
-                    break
-                if not buf:
-                    break
-                consume()
-
-                if time.time() > deadline:
-                    timeout = True
-                    log.info(f"Process timed out for student {self._chalk_env.student_id}")
-                    process.kill()
-                    break
-
-        consume()
-
-        if buf:
-            line = buf.decode(errors="replace")
-            output_lines.append(line)
-            self._on_output_line(line)
-
-        os.close(self._master_pty_fd)
-        os.close(self._slave_pty_fd)
-        stdout = remove_ansi_codes("\n".join(output_lines))
+        if self.capture_output:
+            timeout, stdout = self._run_to_stdout()
+        else:
+            timeout = self._run_no_capture()
+            stdout = ""
         self._repo.write_file("chalk.stdout", stdout)
 
         # The script may hang (timeout=True), and even so it may generate a valid report file.
@@ -183,6 +126,65 @@ class ScriptRunner:
             feedback=result.feedback,
             score=result.score,
         )
+
+    def _run_to_stdout(self) -> tuple[bool, str]:
+        deadline = (self.timeout or float("inf")) + time.time()
+        process = self.process
+
+        timeout = False
+        dt = 0.025
+        output_lines = []
+        buf = b""
+        os.set_blocking(self._master_pty_fd, False)
+
+        def consume_buf():
+            nonlocal buf
+            line = buf.removesuffix(b"\r").decode(errors="replace")
+            self._on_output_line(line)
+            output_lines.append(line)
+            buf = b""
+
+        while process.poll() is None:
+            if time.time() > deadline:
+                timeout = True
+                log.info(f"Process timed out for student {self._chalk_env.student_id}")
+                process.kill()
+                break
+
+            try:
+                char = os.read(self._master_pty_fd, 1)
+            except BlockingIOError:
+                time.sleep(dt)
+                continue
+
+            if char == b"\n":
+                consume_buf()
+            else:
+                buf += char
+
+        buf = buf.rstrip(b"\r\n")
+        if buf:
+            consume_buf()
+
+        os.close(self._master_pty_fd)
+        os.close(self._slave_pty_fd)
+        stdout = remove_ansi_codes("\n".join(output_lines))
+
+        return timeout, stdout
+
+    def _run_no_capture(self) -> bool:
+        try:
+            self.process.wait(self.timeout)
+            timeout = False
+        except subprocess.TimeoutExpired:
+            log.info(f"Process timed out for student {self._chalk_env.student_id}")
+            self.process.kill()
+            timeout = True
+        finally:
+            os.close(self._master_pty_fd)
+            os.close(self._slave_pty_fd)
+
+        return timeout
 
     def _get_shell_command(self, script_path: Path) -> str:
         """
@@ -244,7 +246,7 @@ class ChalkEnv:
             "CHALK_ROOT": str(path),
             "CHALK_RESULT": report,
             "CHALK_ANSWER": self.answer_path,
-            "CHALK_ANSWER_CONTENT": serialize_answer(self.answer),
+            "CHALK_ANSWER_CONTENT": serialize_any_answer(self.answer),
             "CHALK_STUDENT": self.student_id,
             "CHALK_QUESTION": self.question_id,
             "CHALK_ASSIGNMENT": self.quiz_id,

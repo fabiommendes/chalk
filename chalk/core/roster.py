@@ -88,7 +88,7 @@ class Roster(Mapping[StudentId, Student]):
     def __getitem__(self, key: StudentId) -> Student:
         return self.data[key]
 
-    def fuzzy_get(self, label: str, max_matches: int = 5) -> list[Student]:
+    def get_fuzzy(self, label: str, max_matches: int = 5) -> list[Student]:
         """
         Fuzzy match the given student ID to students in the roster.
 

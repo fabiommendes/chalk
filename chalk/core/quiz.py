@@ -4,20 +4,18 @@ from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
+from logging import getLogger
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
     Iterable,
-    Literal,
     MutableSequence,
-    cast,
 )
-from warnings import deprecated
 
 import opt
 import pandas as pd
-import rich
+from rich.console import RenderableType
 
 from ..core.answer import AnyAnswer
 from ..core.models import QuestionId, QuizId, StudentId
@@ -36,6 +34,8 @@ from .student import Student
 
 if TYPE_CHECKING:
     from .classroom import Classroom
+
+log = getLogger(__name__)
 
 __all__ = ["Quiz"]
 
@@ -203,24 +203,20 @@ class Quiz:
                 continue
             yield student_id, answer
 
+    def iter_questions(self) -> Iterable[Question]:
+        """
+        Iterate over the questions for this quiz.
+        """
+        for question_id in self.get_question_ids():
+            question = self.get_question(question_id)
+            if question is not None:
+                yield question
+            else:
+                log.warning(f"Invalid question at {self.id}/{question_id}")
+
     #
     # Dataframes
     #
-    @deprecated("Use quiz.grades.get_dataframe() instead.")
-    def get_grades_dataframe(self, total: str | bool = False) -> pd.DataFrame:
-        return self.grades.get_dataframe(total=total)
-
-    @deprecated("Use Table.from_dataframe(quiz.grades.get_dataframe()) instead.")
-    def get_grades_table(self, total: str | bool = False) -> Table[Decimal | None]:
-        """
-        Get the grades for all students and questions in this quiz.
-
-        If total is provided, it will be added as a column with the sum of all
-        question grades for each student.
-        """
-
-        return Table.from_dataframe(self.get_grades_dataframe(total=total))
-
     def question_statistics_dataframe(self) -> pd.DataFrame:
         """
         Get a dataframe with question information.
@@ -255,18 +251,14 @@ class Quiz:
         acc_count: dict[QuestionId, int] = defaultdict(int)
         acc_skips: dict[QuestionId, int] = defaultdict(int)
 
-        # FIXME:
-        # for student_id, submission in self.iter_submissions():
-        for student_id, submission in []:
-            for q_id, response in submission.responses.items():
-                if response.grade is not None:
-                    value = response.grade.value
-                    acc_sum[q_id] += value
-                    acc_sqr[q_id] += value**2
-                    acc_count[q_id] += 1
-                    acc_max[q_id] = max(acc_max[q_id], value)
-                else:
-                    acc_skips[q_id] += 1
+        for _, q_id, grade in self.grades.iter_grades():
+            if grade is not None:
+                acc_sum[q_id] += grade
+                acc_sqr[q_id] += grade**2
+                acc_count[q_id] += 1
+                acc_max[q_id] = max(acc_max[q_id], grade)
+            else:
+                acc_skips[q_id] += 1
 
         for q_id, item in data.items():
             S = acc_sum[q_id]
@@ -282,7 +274,7 @@ class Quiz:
             m2 = S2 / N if N > 0 else zero
             mean = S / N if N > 0 else zero
             item["grade_mean"] = mean = as_chalk_decimal(mean)
-            item["grade_std"] = as_chalk_decimal((m2 - mean**2).sqrt())
+            item["grade_std"] = as_chalk_decimal(abs(m2 - mean**2).sqrt())
 
         columns = "id name type grade grade_mean grade_max grade_std skip_rate".split()
         df = pd.DataFrame(data.values())[columns]
@@ -293,50 +285,31 @@ class Quiz:
     #
     # Display user info
     #
-    def dump(
-        self,
-        path: Path | None = None,
-        format: Literal["table", "csv", "json", "yaml"] | None = None,
-        sort: Literal["id", "name", "grade", "value"] | None = None,
-    ) -> None:
-        """
-        Display details about the quiz to the console.
-        """
-        title = self.name or "Unnamed Quiz"
-        rich.print(f"[b cyan]{title}[/] [dim]({self.id})[/]")
-        if self.start:
-            rich.print(f" - [b]Start:[/] {self.start.isoformat()}")
-        if self.end:
-            rich.print(f" - [b]End:[/] {self.end.isoformat()}")
+    def __rich__(self) -> RenderableType:
+        totals = self.grades.get_dataframe(total="__total")["__total"].dropna().to_list()
+        grades_cell = None
+        max_grade = None
+        if totals:
+            N = len(totals)
+            max_grade = max(totals)
+            mean = as_chalk_decimal(sum(totals, Decimal(0)) / N)
+            s2 = sum((t**2 for t in totals), Decimal(0)) / N
+            std = as_chalk_decimal((s2 - mean * mean).sqrt())
+            grades_cell = f"{mean} ± {std}"
 
-        if self.get_questions():
-            grades = Table.from_dataframe(self.grades.get_dataframe(total="_total"))
-            totals = cast(list[Decimal], grades.get_column("_total"))
-
-            grades_cell = None
-            max_grade = None
-            if totals:
-                N = len(totals)
-                max_grade = max(totals)
-                mean = as_chalk_decimal(sum(totals) / N)
-                s2 = sum((t**2 for t in totals), Decimal(0)) / N
-                std = as_chalk_decimal((s2 - mean * mean).sqrt())
-                grades_cell = f"{mean} ± {std}"
-
-            table = self.question_table()
-            table.dump(
-                path,
-                format=format,
-                sort=sort,
-                last_row={
+        table = self.question_table()
+        return table.render(
+            extra_rows=[
+                {
                     "id": "total",
                     "name": self.name,
                     "grades": grades_cell,
                     "max grade": max_grade,
                     "value": sum(table.get_column("value"), Decimal(0)),  # type: ignore
-                },
-                styles={"id": "bold yellow", "value": "bold blue"},
-            )
+                }
+            ],
+            styles={"id": "bold yellow", "value": "bold blue"},
+        )
 
     def info(self) -> dict[str, Any]:
         """

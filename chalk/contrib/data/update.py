@@ -1,5 +1,6 @@
 import csv
 import sys
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import IO, Annotated, Any, Literal
@@ -7,8 +8,8 @@ from typing import IO, Annotated, Any, Literal
 import typer
 from natsort import natsorted
 
-from chalk.core.answer import serialize_answer
-from chalk.data import load_structured_data
+from chalk.core.answer import serialize_any_answer
+from chalk.data import dump_structured_data, load_structured_data
 
 app = typer.Typer()
 
@@ -55,6 +56,8 @@ def main(
     data: Any = load_structured_data(source)
     submissions_target = source.parent / "submissions.csv"
     grades_target = source.parent / "grades.csv"
+    conf_bak = source.parent / "conf.bak.yaml"
+    conf_target = source
 
     if not force and submissions_target.exists():
         raise FileExistsError(f"Target file already exists: {submissions_target}")
@@ -62,11 +65,15 @@ def main(
     if not force and grades_target.exists():
         raise FileExistsError(f"Target file already exists: {grades_target}")
 
-    process_submissions(
-        data["submissions"], sys.stdout if dry_run else submissions_target.open("w")
-    )
+    dest = sys.stdout if dry_run else submissions_target.open("w")
+    process_submissions(data["submissions"], dest)
 
-    process_grades(data["submissions"], sys.stdout if dry_run else grades_target.open("w"))
+    dest = sys.stdout if dry_run else grades_target.open("w")
+    process_grades(data["submissions"], dest)
+
+    conf_bak.write_text(source.read_text())
+    dest = sys.stdout if dry_run else conf_target.open("w")
+    process_conf(data, dest)
 
 
 def process_submissions(submissions: Any, file: IO[str]) -> None:
@@ -86,7 +93,7 @@ def process_submissions(submissions: Any, file: IO[str]) -> None:
         responses = sub.get("responses", {})
         for q in question_cols:
             answer = responses.get(q, {}).get("answer")
-            row.append(serialize_answer(answer) if answer is not None else None)
+            row.append(serialize_any_answer(answer) if answer is not None else None)
         writer.writerow(row)
 
 
@@ -107,8 +114,38 @@ def process_grades(submissions: Any, file: IO[str]) -> None:
         responses = sub.get("responses", {})
         for q in question_cols:
             grade = responses.get(q, {}).get("grade")
-            row.append(str(grade))
+            if grade == "invalid":
+                grade = "error"
+            row.append("" if grade is None else str(grade))
         writer.writerow(row)
+
+
+def process_conf(data: Any, file: IO[str]) -> None:
+    """
+    Process the configuration data and write to the given file.
+    """
+
+    data = deepcopy(data)
+    data.pop("submissions", None)
+    questions = data.pop("questions", {})
+    data.pop("id", None)
+    data["questions"] = [update_question({"id": qid, **qdata}) for qid, qdata in questions.items()]
+
+    dump_structured_data(data, file, format="yaml")
+
+
+def update_question(question: dict[str, Any]) -> dict[str, Any]:
+    """
+    Update a question dictionary to the new format.
+    """
+    question = deepcopy(question)
+    if "grade" in question:
+        question["value"] = question.pop("grade")
+    if "choices" in question:
+        for choice in question["choices"]:
+            if isinstance(choice, dict) and "grade" in choice:
+                choice["value"] = choice.pop("grade")
+    return question
 
 
 def isodate(value: datetime | str | None) -> str | None:

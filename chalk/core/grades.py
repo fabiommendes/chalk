@@ -23,18 +23,20 @@ import opt
 import pandas as pd
 from pydantic import ValidationError
 from pydantic_core import InitErrorDetails
-from rich.console import RenderableType
+from rich.console import Console, RenderableType
 
 from ..data.protocols import get_id
-from ..table import Table
+from ..table import Table, deprecated
+from ..util.dataframe import ALL_STATS, DEFAULT_STATS, Stats, grades_dataframe_stats
 from . import models
 from .decimal import chalk_decimal, render_decimal
 from .disqualification import Disqualification, is_disqualification
 from .models import QuestionId, StudentId
-from .score import MIN_SCORE, Score, mul, score
+from .score import MAX_SCORE, MIN_SCORE, Score, mul, score
 
 if TYPE_CHECKING:
     from ..question import Question
+    from .classroom import Classroom
     from .quiz import Quiz
     from .student import Student
 
@@ -51,6 +53,7 @@ RENDERED_COMMON_FRACTIONS = {
     Fraction(3, 4): "0.75",
     Fraction(1): "1.00",
 }
+RENDERED_COMMON_FRACTIONS_INV = {v: k for k, v in RENDERED_COMMON_FRACTIONS.items()}
 
 
 type Field = str
@@ -75,15 +78,16 @@ class Grades:
     It behaves like a mapping from (student_id, question_id) to a score or disqualification.
     """
 
-    def __rich__(self) -> RenderableType:
-        return Table.from_dataframe(self.get_dataframe(total="total"))
-
     #
     # Properties
     #
     @property
     def quiz(self) -> Quiz:
         return opt.unpack(self._quiz(), throw=RuntimeError("Quiz reference is dead"))
+
+    @property
+    def classroom(self) -> Classroom:
+        return self.quiz.classroom
 
     #
     # Constructors
@@ -105,7 +109,7 @@ class Grades:
             self._graded_questions.update(submission.responses.keys())
 
     #
-    # Core methods
+    # IO
     #
     def save(self, path: Path | None = None):
         """
@@ -117,6 +121,48 @@ class Grades:
         file = io.StringIO()
         save_grades_to_path(self._grades, file, self.quiz.get_question_ids())
         path.write_text(file.getvalue())
+
+    def render(
+        self,
+        *,
+        title: str | None = None,
+        sort: QuestionId = "id",
+        stats: Iterable[Stats] = DEFAULT_STATS,
+        total: str | bool = "total",
+    ) -> RenderableType:
+        """
+        Render the grades as a table.
+        """
+        df = self.get_dataframe(total=total)
+        table = Table.from_dataframe(df)
+
+        extra_rows: list[dict[str, Any]] = []
+        if stats:
+            stats = list(stats)
+            if not all(stat in ALL_STATS for stat in stats):
+                raise ValueError(f"Invalid stats: {stats}. Valid stats are: {ALL_STATS}")
+            stats_df = grades_dataframe_stats(df)
+
+            for stat in stats:
+                data = cast(dict[str, Any], stats_df[stat].to_dict())
+                extra_rows.append({"id": stat, **data})
+
+        return table.render(
+            styles={"id": "bold yellow", "total": "bold blue"},
+            title=title.format(quiz=self.quiz) if title else None,
+            empty="No grades available",
+            sort=sort,
+            extra_rows=extra_rows,
+        )
+
+    def __rich__(self) -> RenderableType:
+        return self.render()
+
+    def __str__(self) -> str:
+        file = io.StringIO()
+        console = Console(file=file)
+        console.print(self.render())
+        return file.getvalue()
 
     #
     # Getters and setters
@@ -190,6 +236,7 @@ class Grades:
                 self.quiz.get_question(question),
                 throw=ValueError(f"Invalid question id: {question}"),
             )
+
         return mul(value, question.value)
 
     def set_score(
@@ -232,7 +279,8 @@ class Grades:
         rows: dict[StudentId, dict[QuestionId, Decimal]] = defaultdict(dict)
 
         for student_id, question_id, grade in self.iter_grades():
-            rows[student_id][question_id] = grade
+            if grade is not None:
+                rows[student_id][question_id] = grade
 
         index = sorted(rows.keys())
         values = [rows[student_id] for student_id in index]
@@ -255,25 +303,139 @@ class Grades:
     def iter_scores(
         self,
         *,
+        question: QuestionId | Question,
+        disqualified: Literal["min", "max"] | Score | None,
+    ) -> Iterable[tuple[StudentId, Score | None]]: ...
+
+    @overload
+    def iter_scores(
+        self,
+        *,
+        question: QuestionId | Question,
+        disqualified: Literal["keep"] = "keep",
+    ) -> Iterable[tuple[StudentId, Score | Disqualification | None]]: ...
+
+    @overload
+    def iter_scores(
+        self,
+        *,
+        student: StudentId | Student,
+        disqualified: Literal["min", "max"] | Score | None,
+    ) -> Iterable[tuple[QuestionId, Score | None]]: ...
+
+    @overload
+    def iter_scores(
+        self,
+        *,
+        student: StudentId | Student,
+        disqualified: Literal["keep"] = "keep",
+    ) -> Iterable[tuple[QuestionId, Score | Disqualification | None]]: ...
+
+    def iter_scores(
+        self,
+        *,
+        question: QuestionId | Question | None = None,
+        student: StudentId | Student | None = None,
+        disqualified: Literal["keep", "min", "max"] | Score | None = "keep",
+    ) -> Iterable[tuple[Any, Score | Disqualification | None]]:
+        """
+        Iterate over all scores.
+
+        This method allow filtering by question or student.
+
+        Args:
+            question:
+                The question or question id to filter scores by.
+            student:
+                The student or student id to filter scores by.
+            disqualified:
+                How to handle disqualified scores. If "keep", keep the disqualification.
+                If "min", replace disqualified scores with the minimum score (0).
+                If "max", replace disqualified scores with the maximum score (1).
+                If a Score is provided, replace disqualified scores with that score.
+        """
+        if disqualified == "keep":
+            disqualified_fn = lambda x: x
+        elif disqualified == "min":
+            disqualified_fn = lambda x: MIN_SCORE
+        elif disqualified == "max":
+            disqualified_fn = lambda x: MAX_SCORE
+        else:
+            disqualified_fn = lambda x: disqualified
+
+        if question is None and student is None:
+            raise TypeError("one of question or student must be specified")
+
+        if question is not None:
+            qid = get_id(question)
+            yield from self._iter_question_scores(qid, disqualified_fn)
+
+        if student is not None:
+            sid = get_id(student)
+            yield from self._iter_student_scores(sid, disqualified_fn)
+
+    def _iter_question_scores(
+        self,
+        question_id: QuestionId,
+        disqualified_fn: Callable[[Disqualification], Score | None],
+    ) -> Iterable[tuple[StudentId, Any]]:
+        question_id = get_id(question_id)
+        for student_id, submission in self._grades.items():
+            for qid, response in submission.responses.items():
+                if qid != question_id:
+                    continue
+
+                score = response.score
+                if isinstance(score, Disqualification):
+                    yield student_id, disqualified_fn(score)
+                else:
+                    yield student_id, score
+
+    def _iter_student_scores(
+        self,
+        student_id: StudentId,
+        disqualified_fn: Callable[[Disqualification], Score | None],
+    ) -> Iterable[tuple[QuestionId, Any]]:
+
+        submission = self._grades.get(student_id)
+        if submission is None:
+            return
+
+        for qid, response in submission.responses.items():
+            score = response.score
+            if isinstance(score, Disqualification):
+                yield qid, disqualified_fn(score)
+            else:
+                yield qid, score
+
+    @deprecated("iter_all_scores is deprecated, use iter_scores instead")
+    @overload
+    def iter_all_scores(
+        self,
+        *,
         skip_disqualified: Literal[True],
         question: QuestionId | Question | None = None,
         student: StudentId | Student | None = None,
-    ) -> Iterable[StudentQuestionGrade[Score]]: ...
+        skip_missing: bool = False,
+    ) -> Iterable[StudentQuestionGrade[Score | None]]: ...
 
+    @deprecated("iter_all_scores is deprecated, use iter_scores instead")
     @overload
-    def iter_scores[T](
+    def iter_all_scores[T](
         self,
         *,
         disqualified: T,
         question: QuestionId | Question | None = None,
         student: StudentId | Student | None = None,
-    ) -> Iterable[StudentQuestionGrade[Score | T]]: ...
+        skip_missing: bool = False,
+    ) -> Iterable[StudentQuestionGrade[Score | T | None]]: ...
 
-    def iter_scores[T](
+    def iter_all_scores[T](
         self,
         *,
         question: QuestionId | Question | None = None,
         student: StudentId | Student | None = None,
+        skip_missing: bool = False,
         **kwargs: Any,
     ) -> Iterable[StudentQuestionGrade[Any]]:
         """
@@ -296,7 +458,10 @@ class Grades:
             default_disqualified = NotImplemented
             update_disqualified = False
 
+        students = set(self.classroom.roster.keys())
         for student_id, submission in self._iter_submissions(student_id):
+            students.discard(student_id)
+
             for qid, response in self._iter_responses(question_id, submission):
                 grade = response.score
                 if isinstance(grade, Disqualification):
@@ -307,6 +472,16 @@ class Grades:
 
                 yield StudentQuestionGrade(student_id, qid, grade)
 
+        if skip_missing:
+            return
+
+        questions = set(self.quiz.get_question_ids())
+        for student_id in students:
+            for qid in questions:
+                if question_id is not None and qid != question_id:
+                    continue
+                yield StudentQuestionGrade(student_id, qid, None)
+
     @overload
     def iter_grades(
         self,
@@ -314,7 +489,7 @@ class Grades:
         skip_disqualified: Literal[True],
         question: QuestionId | Question | None = None,
         student: StudentId | Student | None = None,
-    ) -> Iterable[StudentQuestionGrade[Decimal]]: ...
+    ) -> Iterable[StudentQuestionGrade[Decimal | None]]: ...
 
     @overload
     def iter_grades[T](
@@ -323,7 +498,7 @@ class Grades:
         disqualified: Decimal = Decimal(0),
         question: QuestionId | Question | None = None,
         student: StudentId | Student | None = None,
-    ) -> Iterable[StudentQuestionGrade[Decimal]]: ...
+    ) -> Iterable[StudentQuestionGrade[Decimal | None]]: ...
 
     @overload
     def iter_grades(
@@ -332,9 +507,9 @@ class Grades:
         question: QuestionId | Question | None = None,
         student: StudentId | Student | None = None,
         **kwargs: Any,
-    ) -> Iterable[StudentQuestionGrade[Decimal]]: ...
+    ) -> Iterable[StudentQuestionGrade[Decimal | None]]: ...
 
-    def iter_grades(self, **kwargs: Any) -> Iterable[StudentQuestionGrade[Decimal]]:
+    def iter_grades(self, **kwargs: Any) -> Iterable[StudentQuestionGrade[Decimal | None]]:
         """
         Iterate over all grades for a given question.
 
@@ -350,12 +525,17 @@ class Grades:
         if "disqualified" not in kwargs:
             kwargs["disqualified"] = Decimal(0)
 
-        for sid, qid, qscore in self.iter_scores(**kwargs):
+        for sid, qid, qscore in self.iter_all_scores(**kwargs):
             try:
                 qvalue = question_values[qid]
             except KeyError:
                 continue
-            yield StudentQuestionGrade(sid, qid, compute_grade(qscore, qvalue))
+
+            if qscore is None:
+                yield StudentQuestionGrade(sid, qid, None)
+            else:
+                grade = compute_grade(qscore, qvalue)
+                yield StudentQuestionGrade(sid, qid, grade)
 
     @overload
     def update_score(
@@ -463,22 +643,20 @@ def compute_grade(score: Score | Disqualification, value: Decimal) -> Decimal:
 # Persistence
 #
 def load_grades_from_path(path: Path, quiz: Quiz) -> Grades:
-
     if not path.suffix == ".csv":
         raise ValueError(f"Expected a CSV file, got {path.suffix}")
 
     reader = csv.reader(path.open("r"), lineterminator="\n")
     rows = iter(reader)
 
+    # Read header row
     columns = next(rows, None)
     if columns is None:
-        raise ValueError(f"Empty file: {path}")
+        return Grades([], quiz)
     n_columns = len(columns)
 
-    # Empty table
     if len(columns) < 2 or columns[0] != "id":
         return Grades([], quiz)
-
     if columns[0] != "id":
         raise ValueError(f"Expected first column to be 'id', got {columns[0]}")
 
@@ -564,17 +742,19 @@ def save_grades_to_path(
     writer = csv.writer(file)
 
     has_global_feedback = False
-    has_feedback: dict[QuestionId, bool] = {}
+    has_feedback: set[StudentId] = set()
 
     for submission in grades.values():
         if submission.feedback is not None:
             has_global_feedback = True
         for qid, response in submission.responses.items():
             if response.feedback is not None:
-                has_feedback[qid] = True
+                has_feedback.add(submission.id)
 
     # Create header row
     columns = ["id"]
+    if has_feedback:
+        columns.append("field")
     if has_global_feedback:
         columns.append("feedback")
     columns.extend(question_ids)
@@ -583,6 +763,8 @@ def save_grades_to_path(
     # Write rows for each student
     for student_id, submission in grades.items():
         row = [student_id]
+        if has_feedback:
+            row.append("score")
         if has_global_feedback:
             row.append("" if submission.feedback is None else submission.feedback)
         for qid in question_ids:
@@ -590,8 +772,9 @@ def save_grades_to_path(
             row.append(render_score(response.score) if response is not None else "")
         writer.writerow(row)
 
-        if has_feedback:
-            row = [""]  # Empty id for feedback row
+        # Write feedback row for each question
+        if student_id in has_feedback:
+            row = ["", "feedback"]  # Empty id for feedback row
             if has_global_feedback:
                 row.append("")  # Empty global feedback
             for qid in question_ids:

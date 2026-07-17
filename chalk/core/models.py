@@ -97,6 +97,8 @@ class Quiz(BaseModel):
 
 
 class Response(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     answer: AnyAnswer | None = None
     start: datetime | None = None
     end: datetime | None = None
@@ -112,7 +114,7 @@ class Submission(BaseModel):
     id: StudentId
     start: datetime | None = None
     end: datetime | None = None
-    responses: Annotated[dict[QuestionId, Response], Field(default_factory=dict)]
+    responses: dict[QuestionId, Response] = Field(default_factory=dict)
 
 
 class ResponseGrade(BaseModel):
@@ -157,6 +159,7 @@ QuestionType = Literal[
 class BaseQuestion(BaseModel):
     id: QuestionId
     name: str | None = None
+    stem: str | None = None
     value: Annotated[
         Decimal | None,
         PlainSerializer(s.optional(s.decimal)),
@@ -402,6 +405,7 @@ class Textual(BaseQuestion):
 # --- Fill-in-the-blank questions ----------------------------------------------
 class FillIn(BaseQuestion):
     type: Literal["fill-in"] = "fill-in"
+    choices: list[list[str]] | None = None
 
 
 # --- Repository based questions -----------------------------------------------

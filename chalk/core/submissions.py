@@ -4,6 +4,7 @@ import csv
 import io
 from collections import defaultdict
 from datetime import datetime
+from logging import getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, NamedTuple, overload
 from weakref import ref
@@ -12,9 +13,9 @@ import opt
 from pydantic import ValidationError
 from pydantic_core import InitErrorDetails
 
-from ..core.answer import serialize_answer
+from ..core.answer import serialize_any_answer
 from ..data.protocols import get_id
-from ..question import persist_answer
+from ..question import persist_answer, serialize_answer
 from . import AnyAnswer, models
 from .models import QuestionId, StudentId
 
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
     from ..question import Question
     from .quiz import Quiz
     from .student import Student
+
+log = getLogger(__name__)
 
 type Field = str
 
@@ -56,11 +59,39 @@ class Submissions:
         # Store all questions that have associated responses.
         # A question is considered to have a response if it has an entry in the
         # submissions dictionary and has at least one non-null response in it.
-        self._inline_questions: set[QuestionId] = set()
+        persisted: set[QuestionId] = set()
+        inlined: set[QuestionId] = set()
         for submission in submissions:
-            self._inline_questions.update(
-                qid for qid, response in submission.responses.items() if response.answer is not None
-            )
+            for qid, response in submission.responses.items():
+                if qid in persisted or qid in inlined:
+                    continue
+
+                question = quiz.get_question(qid)
+                response_root = (
+                    question
+                    and question.get_responses_root()
+                    or (self.quiz.root / qid / "responses")
+                )
+                if response_root.exists():
+                    persisted.add(qid)
+                else:
+                    inlined.add(qid)
+
+        ids = set(self.quiz.get_question_ids())
+        if missing := ids - (persisted | inlined):
+            msg = ", ".join(sorted(missing))
+            msg = f"Questions seen in submissions are not present in quiz {self.quiz.id!r}: {msg}"  # fmt: skip
+            log.error(msg)
+
+            inlined.update(missing)
+
+        if extra := (persisted | inlined) - ids:
+            msg = ", ".join(sorted(extra))
+            msg = f"Answers to questions not found in quiz {self.quiz.id!r}: {msg}"
+            log.error(msg)
+
+        self._persisted_questions = frozenset(persisted)
+        self._inlined_questions = frozenset(inlined)
 
     #
     # Getters and setters
@@ -94,7 +125,7 @@ class Submissions:
             pass
 
         # Try the response submissions initialized from the "responses.csv" file.
-        if question_id in self._inline_questions:
+        if question_id in self._inlined_questions:
             try:
                 answer = self._submissions[student_id].responses[question_id].answer
             except KeyError:
@@ -117,7 +148,7 @@ class Submissions:
 
     def set_answer(
         self,
-        answer: AnyAnswer,
+        answer: AnyAnswer | None,
         *,
         question: QuestionId | Question,
         student: StudentId | Student,
@@ -145,19 +176,17 @@ class Submissions:
 
         #  Determine the storage mode
         if mode == "auto":
-            if question_id in self._inline_questions:
+            if question_id in self._inlined_questions:
                 mode = "inline"
             else:
                 mode = "persist"
-        elif mode == "inline":
-            self._inline_questions.add(question_id)
 
         if mode == "inline":
-            if question_id not in submission.responses:
-                submission.responses[question_id] = models.Response(answer=answer)
-            response = submission.responses[question_id]
+            response = submission.responses.setdefault(question_id, models.Response())
             response.answer = answer
-        else:  # mode == "persist"
+
+        # mode == "persist"
+        else:
             if not isinstance(question, Question):
                 question = opt.unpack(
                     self.quiz.get_question(question_id),
@@ -226,7 +255,7 @@ class Submissions:
         """
         Iterate over all submissions.
         """
-        persisted = self._persisted_questions()
+        persisted = self.persisted_questions()
         for student_id, submission in self._submissions.items():
             responses = {
                 qid: Response(
@@ -252,6 +281,13 @@ class Submissions:
     #
     # Persistence and transformations
     #
+    def reload(self) -> None:
+        """
+        Reload submission object.
+        """
+        new = Submissions.load(self.quiz.root / "submissions.csv", self.quiz)
+        self.__dict__.update(new.__dict__)
+
     def save(self, *, path: Path | None = None, inline_only: bool = False) -> None:
         """
         Save the submissions to a local file.
@@ -262,7 +298,6 @@ class Submissions:
             raise ValueError(f"Expected a CSV file, got {path.suffix}")
 
         questions = [*self.quiz.get_question_ids()]
-        non_inline_questions = set(questions) - self._inline_questions
 
         # Prepare submissions
         submissions: dict[StudentId, models.Submission] = {}
@@ -272,7 +307,7 @@ class Submissions:
 
             for question_id, response in submission.responses.items():
                 responses[question_id] = response.model_copy()
-                if question_id in non_inline_questions:
+                if question_id in self._persisted_questions:
                     responses[question_id].answer = None
 
             submissions[student_id] = new
@@ -284,8 +319,9 @@ class Submissions:
         errors: list[Exception] = []
         if inline_only:
             return
+
         for (student_id, question_id), answer in self._answers_cache.items():
-            if answer is None or question_id not in non_inline_questions:
+            if answer is None or question_id not in self._persisted_questions:
                 continue
 
             question = self.quiz.get_question(question_id)
@@ -326,7 +362,7 @@ class Submissions:
                 separate files instead of the submissions.csv file. Use with caution.
         """
         seen_answers: set[tuple[StudentId, QuestionId]] = set()
-        persisted_questions = self._persisted_questions()
+        persisted_questions = self.persisted_questions()
 
         for student_id, old_submission in list(self._submissions.items()):
             submission = old_submission.model_copy(deep=True)
@@ -387,7 +423,7 @@ class Submissions:
                 If the function returns None, the response is removed.
         """
         question_id = get_id(question)
-        is_persisted = question_id in self._persisted_questions()
+        is_persisted = question_id in self.persisted_questions()
 
         for student_id, submission in list(self._submissions.items()):
             old_response = submission.responses.get(question_id)
@@ -423,12 +459,120 @@ class Submissions:
         if not dry_run:
             self.save()
 
-    def _persisted_questions(self) -> set[QuestionId]:
+    def inline(self, question: Question | QuestionId, /) -> None:
+        """
+        Inline answers that are stored in separate files back into the
+        submissions.csv file.
+
+        It is a NO-OP if answers are already inlined.
+        """
+
+        question_id = get_id(question)
+        question = self._as_question(question)
+        root = question.get_responses_root()
+        suffix = question.get_answer_suffix()
+
+        if not root.exists():
+            return
+
+        remove_files: list[Path] = []
+        saved: dict[StudentId, AnyAnswer] = {}
+        for file in root.iterdir():
+            if not (file.is_file() and file.suffix == suffix):
+                continue
+
+            student_id = file.stem
+            answer = file.read_text()
+            remove_files.append(file)
+            saved[student_id] = answer
+            try:
+                self._answers_cache[(student_id, question_id)] = question.validate_answer(answer)
+            except ValueError:
+                pass
+
+        # Update inlined/persisted questions sets
+        inlined = set(self._inlined_questions)
+        persisted = set(self._persisted_questions)
+        inlined.add(question_id)
+        persisted.discard(question_id)
+
+        self._inlined_questions = frozenset(inlined)
+        self._persisted_questions = frozenset(persisted)
+
+        for student_id, answer in saved.items():
+            sub = self._submissions.setdefault(student_id, models.Submission(id=student_id))
+            response = sub.responses.setdefault(question_id, models.Response())
+            response.answer = answer
+
+        self.save(inline_only=True)
+
+        for file in remove_files:
+            try:
+                file.unlink()
+            except OSError as e:
+                log.warning(f"Error removing persisted file for {question.id!r}: {e}")
+
+        # Try remove empty directories
+        try:
+            root.rmdir()
+        except OSError:
+            log.info(f"Non-empty responses dir: {question.id!r}")
+        try:
+            root.parent.rmdir()
+        except OSError:
+            pass
+
+    def extract(self, question: Question | QuestionId, *, force: bool = False) -> None:
+        """
+        Move answers that are stored inline in the submissions.csv file
+        into separate files under the question directory.
+
+        It is a NO-OP if answers are already stored in separated files.
+        """
+        question_id = get_id(question)
+        question = self._as_question(question)
+        root = question.get_responses_root(mkdir=True)
+        suffix = question.get_answer_suffix()
+
+        def get_sub(id: StudentId) -> models.Submission:
+            return self._submissions.setdefault(id, models.Submission(id=id, responses={}))
+
+        for student_id, answer in self.iter_answers(question=question_id):
+            if answer is None:
+                continue
+
+            file = root / f"{student_id}{suffix}"
+            if force or not file.exists():
+                file.write_text(serialize_answer(question, answer, error="ignore"))
+                submission = get_sub(student_id)
+                response = submission.responses.setdefault(question_id, models.Response())
+                response.answer = None
+            else:
+                msg = f"File already exists for {question.id!r} and student {student_id!r}: {file}"
+                log.warning(msg)
+
+        # Update inlined/persisted questions sets
+        inlined = set(self._inlined_questions)
+        persisted = set(self._persisted_questions)
+        persisted.add(question_id)
+        inlined.discard(question_id)
+
+        self._inlined_questions = frozenset(inlined)
+        self._persisted_questions = frozenset(persisted)
+
+    def inlined_questions(self) -> frozenset[QuestionId]:
+        """
+        The set of questions whose answers are stored inline in the spreadsheet
+        file.
+        """
+        return self._inlined_questions
+
+    def persisted_questions(self) -> frozenset[QuestionId]:
         """
         The set of questions whose answers are not stored inline in the spreadsheet
         file
         """
-        return set(self.quiz.get_question_ids()) - self._inline_questions
+        return self._persisted_questions
 
     def _hydrate_submission(
         self,
@@ -441,7 +585,7 @@ class Submissions:
         Hydrate submission with answers from the cache or persisted files.
         """
 
-        persisted = self._persisted_questions()
+        persisted = self.persisted_questions()
         for question_id, response in submission.responses.items():
             loc = (student_id, question_id)
             is_persisted = question_id in persisted
@@ -459,7 +603,7 @@ class Submissions:
         Hydrate a single response with an answer from the cache or persisted files.
         """
         if is_persisted is None:
-            is_persisted = question_id not in self._persisted_questions()
+            is_persisted = question_id not in self.persisted_questions()
 
         # Try to load from cache or file
         try:
@@ -471,6 +615,17 @@ class Submissions:
 
         if is_persisted:
             response.answer = self.get_answer(question=question_id, student=student_id)
+
+    def _as_question(self, question: Question | QuestionId) -> Question:
+        """
+        Convert a question id to a Question object.
+        """
+        if isinstance(question, QuestionId):
+            question = opt.unpack(
+                self.quiz.get_question(question),
+                throw=ValueError(f"Question {question} not found in quiz {self.quiz.id}"),
+            )
+        return question
 
 
 #
@@ -519,7 +674,11 @@ def collect_validation_errors(errors: list[ValidationError]) -> ValidationError:
 #
 # Persistence and validation
 #
-def load_submissions_from_csv(path: Path, quiz: Quiz) -> Submissions:
+def load_submissions_from_csv(
+    path: Path,
+    quiz: Quiz,
+    error: Literal["raise", "ignore", "warn"] = "warn",
+) -> Submissions:
 
     if not path.suffix == ".csv":
         raise ValueError(f"Expected a CSV file, got {path.suffix}")
@@ -609,8 +768,11 @@ def load_submissions_from_csv(path: Path, quiz: Quiz) -> Submissions:
         else:
             result[student_id] = validated
 
-    if errors:
+    if errors and error == "raise":
         raise collect_validation_errors(errors)
+    if errors and error == "warn":
+        for e in errors:
+            print(e)
 
     return Submissions(result.values(), quiz)
 
@@ -655,17 +817,19 @@ def save_submissions_to_csv(
     for student_id in students:
         submission = submissions[student_id]
         base_row: list[str] = [submission.id]
+        answer_row: list[str] = [submission.id]
         if has_start_col:
-            base_row.append(opt.map(datetime.isoformat, submission.start) or "")
+            answer_row.append(opt.map(datetime.isoformat, submission.start) or "")
+            base_row.append("")
         if has_end_col:
-            base_row.append(opt.map(datetime.isoformat, submission.end) or "")
-        base_row = base_row.copy()
+            answer_row.append(opt.map(datetime.isoformat, submission.end) or "")
+            base_row.append("")
 
         # Write answers
-        row = base_row[:]
+        row = answer_row
         for qid in questions:
             response = submission.responses.get(qid)
-            row.append(serialize_answer(opt.getattr(response, "answer")))
+            row.append(serialize_any_answer(opt.getattr(response, "answer")))
         writer.writerow(row)
 
         # Write start and end times for each question
@@ -724,4 +888,4 @@ def update_persisted_question(
     remove_persisted_question(student_id, question_id, quiz)
     path = quiz.root / question_id / f"{student_id}.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(serialize_answer(answer))
+    path.write_text(serialize_any_answer(answer))

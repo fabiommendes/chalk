@@ -3,7 +3,18 @@ from __future__ import annotations
 import csv
 import io
 from pathlib import Path
-from typing import IO, Any, Collection, Literal, Sequence, assert_never, cast, get_args, overload
+from typing import (
+    IO,
+    Any,
+    Collection,
+    Literal,
+    Sequence,
+    TypeIs,
+    assert_never,
+    cast,
+    get_args,
+    overload,
+)
 
 import rich
 from rich.syntax import Syntax
@@ -28,7 +39,7 @@ type StructuredData = Data | JSON
 type SpreadsheetData = list[dict[str, Any]]
 
 StructuredFormat = Literal["json", "yaml"]
-SpreadsheetFormat = Literal["csv", "xlsx"]
+SpreadsheetFormat = Literal["csv", "xlsx", "json", "yaml"]
 
 STRUCTURED_FORMAT_ALIASES: dict[str, StructuredFormat] = {"yml": "yaml"}
 DEFAULT_BACKUPS: int | bool = False
@@ -198,9 +209,10 @@ def dump_spreadsheet(
     if format is None and isinstance(path, Path):
         format = validate_spreadsheet_format(path.suffix.removeprefix(".").lower())
 
-    if path is None:
+    if path is None and format in ("csv", "xlsx"):
         fd = io.StringIO()
         dump_spreadsheet(data, fd, columns=columns, backup=backup, format="csv")
+        print(fd.getvalue())
         return
 
     match format:
@@ -213,10 +225,13 @@ def dump_spreadsheet(
             writer.writerows(data.to_dicts())
 
             # Atomic write to avoid data loss if the process is interrupted
+            assert path is not None
             write_text(path, stream.getvalue(), rotate=backup)
         case "xlsx":
             msg = "Excel spreadsheet support is not implemented yet"
             raise NotImplementedError(msg)
+        case "json" | "yaml":
+            dump_structured_data(data.to_dicts(), path, format=format, backup=backup)
         case _:
             raise ValueError(f"Unsupported spreadsheet format: {path.suffix}")
 
@@ -235,6 +250,17 @@ def validate_structured_format(format: str) -> StructuredFormat:
         raise ValueError(msg)
 
 
+def is_structured_format(format: str) -> TypeIs[StructuredFormat]:
+    """
+    Check if the given format is a supported structured data format.
+    """
+    try:
+        validate_structured_format(format)
+        return True
+    except ValueError:
+        return False
+
+
 def validate_spreadsheet_format(format: str) -> SpreadsheetFormat:
     """
     Validate that the given format is a supported spreadsheet data format.
@@ -244,6 +270,17 @@ def validate_spreadsheet_format(format: str) -> SpreadsheetFormat:
     else:
         msg = f"Unsupported spreadsheet format: {format}, expect one of: csv, xlsx"
         raise ValueError(msg)
+
+
+def is_spreadsheet_format(format: str) -> TypeIs[SpreadsheetFormat]:
+    """
+    Check if the given format is a supported spreadsheet data format.
+    """
+    try:
+        validate_spreadsheet_format(format)
+        return True
+    except ValueError:
+        return False
 
 
 def write_text(

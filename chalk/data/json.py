@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 from zipfile import Path
 
+from frozendict import frozendict
 from pydantic import BaseModel
 
 from ..table import Table
@@ -48,5 +49,9 @@ def json_default(obj: Any) -> Any:  # -> str | list[Any]:
         return s.decimal(obj)
     elif isinstance(obj, BaseModel):
         return obj.model_dump()
+    elif isinstance(obj, frozendict):
+        return dict(obj)
+    elif isinstance(obj, tuple):
+        return list(obj)
 
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")

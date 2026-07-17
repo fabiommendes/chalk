@@ -52,7 +52,7 @@ class Repo(BaseQuestion[models.Repo, RepoAnswer]):
             /,
             **kwargs: Unpack[GraderKwargs],
         ) -> Graded | None:
-            path = self.root / answer
+            path = (self.root / answer).resolve()
             return raw_grader(id, path, **kwargs)
 
         return repo_grader

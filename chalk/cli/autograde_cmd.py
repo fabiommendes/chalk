@@ -170,6 +170,14 @@ def autograde(
             help="Disable the text-based user interface (TUI)",
         ),
     ] = False,
+    run: Annotated[
+        bool,
+        typer.Option(
+            ...,
+            "--run",
+            help="Only run the script and do not save grades or feedback.",
+        ),
+    ] = False,
 ) -> None:
     """
     Run the autograder for the specified quiz and question.
@@ -189,6 +197,12 @@ def autograde(
 
     if run_script:
         question = cls.prompt_question(quiz, question_id)
+        if sort:
+            raise typer.BadParameter("There is nothing to sort", param_hint=["--sort", "-s"])
+        if output_format:
+            raise typer.BadParameter("There is nothing to format", param_hint=["--format", "-f"])
+        if output_path:
+            raise typer.BadParameter("There is no output to save", param_hint=["--output", "-o"])
 
         run_autograder_debug(
             question,
@@ -196,6 +210,7 @@ def autograde(
             keep_files=keep_files,
             verbose=verbose,
             timeout=timeout,
+            capture_output=not run,
         )
 
     elif output_format or output_path or no_tui:
@@ -239,6 +254,7 @@ def run_autograder_debug(
     keep_files: bool,
     verbose: bool,
     timeout: float,
+    capture_output: bool = True,
 ) -> None:
     grader: Grader[Any] | None = question.get_grader()
     yn_default = "n"
@@ -250,7 +266,6 @@ def run_autograder_debug(
     for student in students:
         answer = question.quiz.submissions.get_answer(student=student, question=question)
         if answer is None:
-            rich.print(f"[dim red]{student.id}: no answer[/]")
             continue
 
         if (
@@ -280,6 +295,7 @@ def run_autograder_debug(
             keep_files=keep_files,
             on_output_line=print,
             timeout=timeout,
+            capture_output=capture_output,
         )
         rich.print(Text("─" * width, style="dim"))
         rich.print(f"[dim]Result for student {student.id}: {result or 'not-graded'}[/]")
@@ -361,16 +377,14 @@ def run_autograder(
     has_changed = False
 
     for student in students:
-        rich.print(f"* [b cyan]{student.id}:[/]", end=" ")
-
         score = grades.get_score(student=student, question=question)
-        if score is not None and not force_grading:
-            info(f"already graded ({score})", style="dim")
-            continue
-
         answer = submissions.get_answer(student=student, question=question)
         if answer is None:
-            info("has no answer.", style="dim yellow")
+            continue
+
+        rich.print(f"* [b cyan]{student.id}:[/]", end=" ")
+        if score is not None and not force_grading:
+            info(f"already graded ({score})", style="dim")
             continue
 
         ans: Any = question.validate_answer(answer)

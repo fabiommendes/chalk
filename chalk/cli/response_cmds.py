@@ -1,5 +1,4 @@
 import io
-import sys
 from pathlib import Path
 from typing import Annotated, Callable
 
@@ -8,95 +7,28 @@ import rich
 import typer
 from rich.prompt import Prompt
 
-from ..core import AnyAnswer, Classroom, Question, Quiz, models
-from ..core.answer import json_serialize_answer, serialize_answer
+from ..core import AnyAnswer, Classroom, Question, Quiz, StudentId, models
+from ..core.answer import json_serialize_any_answer, serialize_any_answer
 from ..data import (
     dump_structured_data,
     validate_structured_format,
 )
 from ..question import render_answer
-from ..question import serialize_answer as question_serialize_answer
 from ..transform import create_script as create_transform_script
 from ..transform import list_transforms, load_transform
 from ..util.external import open_editor
 from ..util.path import batch_save
 from .util import safe
 
-app = typer.Typer()
+
+def add_response_commands(app: typer.Typer) -> None:
+    app.command()(transform)
+    app.command()(extract)
 
 
 # ==============================================================================
-# chalk response view
+# chalk transform
 # ==============================================================================
-@app.command()
-@safe
-def view(
-    quiz_id: Annotated[
-        str | None,
-        typer.Argument(
-            metavar="ASSIGNMENT",
-        ),
-    ] = None,
-    question_id: Annotated[
-        str | None,
-        typer.Argument(
-            metavar="QUESTION",
-        ),
-    ] = None,
-    student_id: Annotated[
-        str | None,
-        typer.Argument(
-            metavar="STUDENT",
-        ),
-    ] = None,
-    plain: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            "--plain",
-            help="Print the answer without rich formatting",
-        ),
-    ] = False,
-    output: Annotated[
-        Path | None,
-        typer.Option(
-            ...,
-            "-o",
-            "--output",
-            help="Write the answer to a file instead of printing it to the console",
-        ),
-    ] = None,
-) -> None:
-    """
-    List all responses for the given question.
-    """
-
-    cls, quiz, question = Classroom.from_prompt(quiz_id=quiz_id, question_id=question_id)
-    student = cls.prompt_student(student_id, fuzzy=True)
-    answer = quiz.get_answer(question, student=student)
-
-    # Show name
-    if output is None:
-        max_grade = f"/[blue]{question.value}[/]" if question.value is not None else ""
-
-        rich.print(f"[bold green]{quiz.name}, {question.name}[/]")
-        # FIXME: rich.print(f"[dim]Grade: {opt.unwrap(response.grade, 'N/A')}[/]{max_grade}")
-        rich.print()
-
-    if output is None:
-        rich.print(render_answer(question, answer, plain=plain))
-    elif answer is not None:
-        # FIXME: correct dump file
-        output.write_text(str(answer))
-    else:
-        rich.print("[yellow]No answer found for this question.[/]", file=sys.stderr)
-        raise typer.Exit(1)
-
-
-# ==============================================================================
-# chalk response transform
-# ==============================================================================
-@app.command()
 @safe
 def transform(
     quiz_id: Annotated[
@@ -203,30 +135,28 @@ def transform(
 
 
 # ==============================================================================
-# chalk response separate
+# chalk extract
 # ==============================================================================
-@app.command()
 @safe
-def separate(
-    quiz_id: Annotated[
+def extract(
+    loc: Annotated[
         str | None,
         typer.Argument(
-            metavar="ASSIGNMENT",
+            metavar="LOC",
+            help=(
+                "Location of the questions to separate responses for (e.g. 'quiz1/q1')"
+                + "\n\nIf only the quiz is provided, separate all textual questions."
+            ),
         ),
     ] = None,
-    question_id: Annotated[
-        str | None,
-        typer.Argument(
-            metavar="QUESTION",
-        ),
-    ] = None,
-    suffix: Annotated[
+    extension: Annotated[
         str | None,
         typer.Option(
             ...,
-            "-s",
-            "--suffix",
-            help="The suffix to use for the exported files.",
+            "-e",
+            "--ext",
+            metavar="EXT",
+            help="The extension to use for the exported files.",
         ),
     ] = None,
     force: Annotated[
@@ -238,38 +168,65 @@ def separate(
             help="Force overwrite of existing files.",
         ),
     ] = False,
+    inline: Annotated[
+        bool,
+        typer.Option(
+            ...,
+            "-i",
+            "--inline",
+            help="Inline answers back into the responses.csv file.",
+        ),
+    ] = False,
 ) -> None:
     """
-    Extract all answers from the responses.csv and write them to separate files
-    in the question directory.
+    Move answers from responses.csv to separate files for easier editing or
+    vice-versa.
     """
-    quiz, question = Classroom.from_prompt(quiz_id=quiz_id, question_id=question_id)[1:]
 
-    old_suffix = question.get_answer_extension()
-    new_suffix = suffix or question.get_answer_extension(suffix)
-    if new_suffix is None:
-        msg = "The --suffix/-s option is required when the question has no default suffix."
-        raise typer.BadParameter(msg)
+    cls, quiz, question = Classroom.from_prompt(loc)
+    if quiz is None:
+        rich.print("[red]Error: Quiz not found[/]")
+        raise typer.Exit(1)
 
-    # Load responses and save them on separate files
-    root = question.get_root(mkdir=True)
-    for student_id, answer in quiz.iter_answers(question, inline_only=True):
-        file_path = root / f"{student_id}.{new_suffix}"
-        if not force and file_path.exists():
-            rich.print(f"[yellow]Skipping: {file_path.name}[/]")
-            continue
+    subs = quiz.submissions
+    if question is None:
+        filter = subs.persisted_questions() if inline else subs.inlined_questions()
 
-        src = question_serialize_answer(question, answer)
-        file_path.write_text(src)
+        if inline:  # We only inline persisted questions
+            questions = opt.filter(quiz.get_question(q) for q in filter)
+        else:
+            questions = (q for q in quiz.iter_questions() if q.type == "text" and q.id in filter)
 
-    if old_suffix != new_suffix:
-        question.answer_suffix = new_suffix
+    else:
+        questions = [question]
+
+    if extension is not None:
+        extension = normalize_extension(extension)
+
+    save_quiz = False
+    for question in questions:
+        if extension is not None and extension != question.get_answer_suffix():
+            save_quiz = True
+            question.answer_suffix = extension
+        if inline:
+            subs.inline(question)
+        else:
+            subs.extract(question, force=force)
+
+    if save_quiz:
         quiz.save()
 
-    print(old_suffix, new_suffix)
+    subs.save()
 
-    # Update the responses.csv to reflect that the answers are now persisted
-    quiz.submissions.update_responses(question.id, remove_answer)
+
+def normalize_extension(ext: str) -> str:
+    """
+    Normalize the extension to ensure it starts with a dot.
+    """
+    ext = ext.strip()
+    if ext and ext[0] not in ".-_":
+        ext = f".{ext}"
+    return ext
 
 
 #
@@ -291,15 +248,15 @@ def apply_transforms(
     if student_id:
         raise NotImplementedError("Filtering by student ID is not yet implemented.")
 
-    for student_id, response in quiz.get_responses_for_question(question).items():
-        original_answer = response.answer
+    trasformed: dict[StudentId, AnyAnswer] = {}
+    for student_id, answer in quiz.submissions.iter_answers(question=question):
+        original_answer = answer
         transformed_answer = transform(original_answer)
-
         if transformed_answer is None:
             continue
 
         if force:
-            response.answer = transformed_answer
+            trasformed[student_id] = transformed_answer
             has_changes = True
             continue
 
@@ -310,7 +267,7 @@ def apply_transforms(
         prompt = Prompt.ask("Accept?", choices=["y", "n", "all", "none"], default="y")
 
         if prompt in ["all", "y"]:
-            response.answer = transformed_answer
+            trasformed[student_id] = transformed_answer
             has_changes = True
         if prompt == "all":
             force = True
@@ -318,6 +275,8 @@ def apply_transforms(
             break
 
     if has_changes:
+        for student_id, answer in trasformed.items():
+            quiz.submissions.set_answer(answer, student=student_id, question=question)
         quiz.save()
 
 
@@ -344,10 +303,10 @@ def archive_responses(
             if answer is None:
                 continue
             with io.StringIO() as fd:
-                dump_structured_data(json_serialize_answer(answer), fd, format=format)
+                dump_structured_data(json_serialize_any_answer(answer), fd, format=format)
                 content[Path(item + suffix)] = fd.getvalue()
     else:
-        normalizer = normalizer or serialize_answer
+        normalizer = normalizer or serialize_any_answer
         for item, answer in data.items():
             if answer is None:
                 continue

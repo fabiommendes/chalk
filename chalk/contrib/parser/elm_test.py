@@ -41,7 +41,7 @@ def main(
         typer.echo(f"Error parsing Elm tests: {e}", err=True)
         raise typer.Exit(code=1)
 
-    json_data = json.dumps(result, indent=4)
+    json_data = "CHALK_RESULT: " + json.dumps(result)
 
     if output is not None:
         output.write_text(json_data)
@@ -58,15 +58,19 @@ def parse_elm_tests(data: Iterable[str]) -> dict:
         doc: dict[str, Any] = json.loads(line)
         if doc.get("event") != "testCompleted":
             continue
+        # rich.print(doc)
 
-        passed += doc.get("status") == "pass"
-        failed += doc.get("status") == "fail"
+        is_passed = doc.get("status") == "pass"
+        passed += is_passed
+        failed += not is_passed
 
     if passed == 0 and failed == 0:
         raise ValueError("No Elm test result found in the provided input.")
 
-    feedback = f"ok: {passed}, fail: {failed}"
-    return {"score": passed, "max": max(passed + failed, 1), "feedback": feedback}
+    result = {"pass": passed, "fail": failed}
+    if passed and failed:
+        result["feedback"] = f"elm-test: {passed} passed, {failed} failed"
+    return result
 
 
 if __name__ == "__main__":

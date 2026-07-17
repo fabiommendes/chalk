@@ -40,6 +40,11 @@ Score = UnboundScore | BoundScore
 
 MAX_SCORE: BoundScore = DecimalScore(Decimal(1))
 MIN_SCORE: BoundScore = DecimalScore(Decimal(0))
+HALF_SCORE: BoundScore = DecimalScore(Decimal(0.5))
+QUARTER_SCORE: BoundScore = DecimalScore(Decimal(0.25))
+THREE_QUARTERS_SCORE: BoundScore = DecimalScore(Decimal(0.75))
+THIRD_SCORE: BoundScore = FractionScore(Fraction(1, 3))
+TWO_THIRDS_SCORE: BoundScore = FractionScore(Fraction(2, 3))
 
 
 class BinOp(Protocol):

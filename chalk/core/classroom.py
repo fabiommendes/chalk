@@ -6,7 +6,18 @@ from decimal import Decimal
 from functools import cached_property
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, NamedTuple, overload
+from types import ModuleType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    Literal,
+    NamedTuple,
+    Never,
+    cast,
+    overload,
+)
 
 import opt
 import pandas as pd
@@ -14,10 +25,11 @@ from natsort import natsorted
 from rich.prompt import Prompt
 
 from ..data import load_spreadsheet, load_structured_data
+from ..numeric import to_decimal
 from ..question import Question
 from . import models
 from .decimal import set_decimal_precision
-from .error import ChalkError, ChalkException, RosterNotFoundError
+from .error import ChalkError, ChalkException, ResourceNotFoundError, RosterNotFoundError
 from .models import Autograder, QuestionId, QuizId, StudentId
 from .quiz import Quiz
 from .roster import Roster
@@ -99,8 +111,8 @@ class Classroom:
     @classmethod
     def from_prompt(
         cls,
-        root: Path | None = None,
         *,
+        root: Path | None = None,
         quiz_id: str | None,
         on_error: Callable[[str], Exception] | None = None,
     ) -> ClsQuiz: ...
@@ -109,8 +121,8 @@ class Classroom:
     @classmethod
     def from_prompt(
         cls,
-        root: Path | None = None,
         *,
+        root: Path | None = None,
         quiz_id: str | None = None,
         question_id: str | None,
         on_error: Callable[[str], Exception] | None = None,
@@ -128,12 +140,69 @@ class Classroom:
         on_error: Callable[[str], Exception] | None = None,
     ) -> ClsQuizQuestion: ...
 
+    @overload
     @classmethod
-    def from_prompt(cls, root: Path | None = None, **kwargs: Any) -> Any:
+    def from_prompt(
+        cls,
+        loc: str | None = None,
+        *,
+        root: Path | None = None,
+        on_error: Callable[[str], Exception] | None = None,
+        check_exist: Literal[False] = False,
+    ) -> OptClsQuizQuestion: ...
+
+    @overload
+    @classmethod
+    def from_prompt(
+        cls,
+        loc: str | None = None,
+        *,
+        root: Path | None = None,
+        on_error: Callable[[str], Exception] | None = None,
+        check_exist: Literal[True],
+    ) -> ClsQuizQuestion: ...
+
+    @classmethod
+    def from_prompt(cls, *args, check_exist=False, **kwargs: Any) -> Any:
         """
         Prompt the user to select a classroom root directory and load it.
         """
-        cfg = cls.load(root)
+        cfg = cls.load(kwargs.pop("root", None))
+        if len(args) > 1:
+            msg = f"from_prompt() takes at most 1 positional argument but {len(args)} were given"
+            raise TypeError(msg)
+
+        # Fetch from a loc like a quiz_id, quiz_id/question_id
+        if args:
+            expect_question = False
+            loc = cast(str, args[0])
+            if loc is None:
+                return OptClsQuizQuestion(cfg, None, None)
+
+            if "/" in loc:
+                quiz_id, question_id = loc.split("/", 1)
+                expect_question = check_exist
+            else:
+                quiz_id, question_id = loc, None
+
+            quiz = cfg.get_quiz(quiz_id)
+
+            question = None
+            if question_id is not None and quiz is not None:
+                question = quiz.get_question(question_id)
+                if question is None:
+                    raise ResourceNotFoundError(
+                        f"Question {question_id!r} does not exist in quiz {quiz_id!r}!",
+                        "question",
+                        question_id,
+                    )
+
+            if check_exist and quiz is None:
+                raise ResourceNotFoundError(f"Quiz {quiz_id!r} does not exist!", "quiz", quiz_id)
+            if expect_question and question is None:
+                raise ResourceNotFoundError(f"Quiz {quiz_id!r} does not exist!", "quiz", quiz_id)
+
+            return OptClsQuizQuestion(cfg, quiz, question)
 
         quiz = None
         if "quiz_id" in kwargs:
@@ -184,10 +253,12 @@ class Classroom:
                 return Roster(path=self._root / "roster.csv", data={})
             raise
 
-    def get_student(self, student_id: StudentId) -> Student | None:
+    def get_student(self, student_id: StudentId, fuzzy: bool = False) -> Student | None:
         """
         Get a student by their ID.
         """
+        if fuzzy:
+            return opt.single(self.get_roster().get_fuzzy(student_id, max_matches=1))
         return self.get_roster().get(student_id)
 
     def get_quiz(self, quiz_id: str) -> Quiz | None:
@@ -197,22 +268,31 @@ class Classroom:
         if quiz_id in self._quiz_cache:
             return self._quiz_cache[quiz_id]
 
-        conf_path = self.root / quiz_id / "conf.yaml"
-        if not conf_path.exists():
-            return None
+        quiz_ids = set(self.iter_quiz_ids())
+        if quiz_id not in quiz_ids:
+            quiz_ids_no_case = {q.casefold(): q for q in quiz_ids}
+            if quiz_id.casefold() in quiz_ids_no_case:
+                quiz_id = quiz_ids_no_case[quiz_id.casefold()]
+            else:
+                return
 
+        conf_path = self.root / quiz_id / "conf.yaml"
         try:
             conf_data = load_structured_data(conf_path)
         except ValueError:
             msg = f"Invalid quiz config: {conf_path.relative_to(self.root)}"
             raise ChalkError.INVALID_RESOURCE(msg)
 
-        conf = models.Quiz.model_validate(conf_data, context={"quiz": quiz_id})
+        conf = models.Quiz.model_validate(
+            conf_data,
+            context={"quiz": quiz_id, "path": conf_path},
+            extra="forbid",
+        )
         quiz = Quiz(quiz_id, conf, classroom=self)
         self._quiz_cache[quiz_id] = quiz
         return quiz
 
-    def get_grades(self, total: bool = True) -> pd.DataFrame:
+    def get_grades(self, total: bool = True, final: bool | None = None) -> pd.DataFrame:
         """
         Get a table of grades for all students in the classroom.
         """
@@ -232,7 +312,66 @@ class Classroom:
 
             columns["total"] = pd.DataFrame(parts).sum(axis=1)
 
-        return pd.DataFrame(columns)
+        df = pd.DataFrame(columns)
+        if final is False:
+            return df
+
+        grader = self.get_final_grader()
+        if final is None and grader is None:
+            return df
+
+        if grader is None:
+            weights = {q.id: q.weight for q in self.iter_quizzes()}
+            total_weights = sum(weights.values())
+            weights = {k: v / total_weights for k, v in weights.items()}
+            grader = lambda grades: sum(grades[q] * weights[q] for q in grades)
+
+        clean = lambda d: d
+        if total:
+            clean = lambda d: {k: v for k, v in d.items() if k != "total"}
+
+        fn = lambda row: grader(clean(row.to_dict()))
+        df["final"] = df.fillna(cast(Any, Decimal(0))).apply(fn, axis=1)
+
+        return df
+
+    def get_final_grader(
+        self,
+    ) -> Callable[[dict[QuestionId, Decimal | None]], Decimal | str] | None:
+        """
+        Return a function that receives a mapping from question IDs to grades
+        and returns a final grade for the student.
+
+        The grades can be numeric (Decimal) or a string (e.g., "Incomplete", "A", "B+", etc).
+        """
+        mod = self.get_conf_module()
+        if mod is not None and hasattr(mod, "final_grade"):
+            return wrap_final_grader(mod.final_grade)
+        return None
+
+    def get_conf_module(self) -> ModuleType | None:
+        """
+        Return the configuration module for the classroom, if available.
+
+        This is a file named conf.py that contains some special python functions
+        that can be used to customize how chalk behaves.
+        """
+        for path in [self.root / "conf.py", self.root / "scripts" / "conf.py"]:
+            if path.exists():
+                import importlib.util
+
+                spec = importlib.util.spec_from_file_location("conf", path)
+                if spec is None or spec.loader is None:
+                    return None
+                mod = importlib.util.module_from_spec(spec)
+
+                try:
+                    spec.loader.exec_module(mod)
+                except Exception as e:
+                    log.error(f"Error loading {path}: {e}")
+                    pass
+                return mod
+        return None
 
     #
     # Interactive/prompting methods
@@ -295,7 +434,7 @@ class Classroom:
         if student is None:
             student = roster.get(student_id)
         if fuzzy and student is None:
-            students = roster.fuzzy_get(student_id)
+            students = roster.get_fuzzy(student_id)
             if interactive and len(students) > 1:
                 student_id = Prompt.ask(
                     "Multiple students found. Please select one",
@@ -320,6 +459,20 @@ class Classroom:
         """
         Iterate over all quizzes in the classroom.
         """
+        for id in self.iter_quiz_ids():
+            try:
+                quiz = self.get_quiz(id)
+            except ChalkException as e:
+                log.warning(f"Error loading quiz {id}: {e}")
+                continue
+
+            if quiz is not None:
+                yield quiz
+
+    def iter_quiz_ids(self) -> Iterable[QuizId]:
+        """
+        Iterate over all quiz IDs in the classroom.
+        """
         for subdir in natsorted(self.root.iterdir(), key=lambda p: p.name):
             if not subdir.is_dir():
                 continue
@@ -327,14 +480,9 @@ class Classroom:
             if subdir.name in RESERVED_NON_QUIZ_NAMES:
                 continue
 
-            try:
-                quiz = self.get_quiz(subdir.name)
-            except ChalkException as e:
-                log.warning(f"Error loading quiz {subdir.name}: {e}")
-                continue
-
-            if quiz is not None:
-                yield quiz
+            conf_path = subdir / "conf.yaml"
+            if conf_path.exists():
+                yield subdir.name
 
 
 #
@@ -379,18 +527,43 @@ def is_project_root(path: Path) -> bool:
     return False
 
 
+def wrap_final_grader(
+    func: Callable[..., Decimal | str],
+) -> Callable[[dict[QuestionId, Decimal | None]], Decimal | str]:
+    """
+    Wrap a final grader function to ensure it returns a Decimal or str.
+    """
+
+    def wrapper(grades: dict[QuestionId, Decimal | None]) -> Decimal | str:
+        kwargs = {q: float(g) if g is not None else 0 for q, g in grades.items()}
+
+        try:
+            result = func(**kwargs)
+            if isinstance(result, (str, Decimal)):
+                return result
+            try:
+                return to_decimal(result)
+            except Exception:
+                raise TypeError(f"Final grader must return Decimal or str, got {type(result)}")
+        except Exception as e:
+            log.error(f"Grader raised an exception: {e}", exc_info=True)
+            return "error"
+
+    return wrapper
+
+
 #
 # Cursor types - return classroom objects with extra data
 #
-class ClsQuiz(NamedTuple):
+class ClsQuiz[Opt = Never](NamedTuple):
     classroom: Classroom
     quiz: Quiz
 
 
-class ClsQuizQuestion(NamedTuple):
+class ClsQuizQuestion[Opt = Never](NamedTuple):
     classroom: Classroom
-    quiz: Quiz
-    question: Question
+    quiz: Quiz | Opt
+    question: Question | Opt
 
 
 class ClsQuizSubQuestion(NamedTuple):
@@ -404,3 +577,6 @@ class ClsQuizSub(NamedTuple):
     classroom: Classroom
     quiz: Quiz
     submissions: Submissions
+
+
+OptClsQuizQuestion = ClsQuizQuestion[None]

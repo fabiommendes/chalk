@@ -55,7 +55,7 @@ NOT_GIVEN = object()
 
 class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
     @classmethod
-    def from_dataframe(cls, df: pd.DataFrame) -> Self:
+    def from_dataframe(cls, df: pd.DataFrame, /) -> Self:
         new = object.__new__(cls)
         new._df = df
         return new
@@ -169,7 +169,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         sort: str | None = None,
         reverse: bool = False,
         empty: str = "[b yellow]Warning:[/] no data to display!",
-        last_row: dict[str, Any] | None = None,
+        extra_rows: Iterable[dict[str, Any]] | None = None,
     ) -> None:
         """
         Dump the table to a file or the console in the specified format.
@@ -184,8 +184,10 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         elif format is None:
             format = "table"
 
-        if last_row and not format == "table":
-            out = self.append(last_row)
+        if extra_rows and not format == "table":
+            out = self
+            for row in extra_rows:
+                out = out.append(row)
             return out.dump(
                 file,
                 format=format,
@@ -210,7 +212,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
                             reverse=reverse,
                             render=render,
                             empty=empty,
-                            last_row=last_row,
+                            extra_rows=extra_rows,
                         )
 
             case "csv":
@@ -243,7 +245,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         render: RenderFn | None = None,
         title: str | None = None,
         empty: RenderableType = Text.assemble(("Warning:", "bold yellow"), " no data to display!"),
-        last_row: dict[str, Any] | None = None,
+        extra_rows: Iterable[dict[str, Any]] | None = None,
     ) -> None:
         """
         Render a table to the console using Rich.
@@ -258,7 +260,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
                 render=render,
                 title=title,
                 empty=empty,
-                last_row=last_row,
+                extra_rows=extra_rows,
             )
         )
 
@@ -272,7 +274,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         render: RenderFn | None = None,
         title: str | None = None,
         empty: RenderableType = Text.assemble(("Warning:", "bold yellow"), " no data to display!"),
-        last_row: dict[str, Any] | None = None,
+        extra_rows: Iterable[dict[str, Any]] | None = None,
     ) -> RichTable | RenderableType:
         """
         Render a table to the console using Rich.
@@ -320,12 +322,12 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
             for column in data.columns:
                 cell = row.get(column)
                 cells.append(render_with(cell, column=column, render=render))
-            table.add_row(*cells, end_section=(i == len(data) - 1) and last_row is not None)
+            table.add_row(*cells, end_section=(i == len(data) - 1) and extra_rows is not None)
 
-        if last_row is not None:
-            cells = [render_with(last_row.get("id"), column="id", render=render)]
+        for extra_row in extra_rows or []:
+            cells = [render_with(extra_row.get("id"), column="id", render=render)]
             for column in data.columns:
-                cell = last_row.get(column)
+                cell = extra_row.get(column)
                 cells.append(render_with(cell, column=column, render=render))
             table.add_row(*cells)
 

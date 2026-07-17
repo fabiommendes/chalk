@@ -80,6 +80,9 @@ def main(
         ),
     ] = False,
 ):
+    """
+    Extract data from github classroom repositories.
+    """
     # Infer input path, if needed
     if source is None:
         match list(Path().glob("*-submissions")):

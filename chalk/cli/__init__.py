@@ -7,19 +7,20 @@ import rich
 import typer
 
 from . import (
-    autograde_app,
+    autograde_cmd,
     clear_app,
+    collect_cmd,
     contrib_app,
-    grades_app,
+    grade_cmd,
     info_app,
     init_app,
     plagiarism_app,
     question_app,
     quiz_app,
-    response_app,
+    response_cmds,
     roster_app,
+    show_cmd,
 )
-from . import report as report_app
 
 app = typer.Typer(name="Chalk", no_args_is_help=True, add_help_option=True)
 
@@ -53,25 +54,18 @@ app.add_typer(
     help="Manage questions for quizzes.",
 )
 app.add_typer(
-    response_app.app,
-    name="response",
-    help="Manage responses for questions.",
-)
-autograde_app.add_autograde_command(app)
-app.add_typer(
-    report_app.app,
-    name="report",
-    help="Generate reports for quizzes and students.",
-)
-app.add_typer(
     plagiarism_app.app,
     name="plagiarism",
     help="Manage plagiarism detection and reports.",
 )
+collect_cmd.add_collect_command(app)
+grade_cmd.add_grade_cmd(app)
+autograde_cmd.add_autograde_command(app)
 info_app.add_info_command(app)
 contrib_app.add_contrib_command(app)
 clear_app.add_clear_command(app)
-grades_app.add_grades_command(app)
+show_cmd.add_show_command(app)
+response_cmds.add_response_commands(app)
 
 
 def main() -> None:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import itertools
-from decimal import Decimal
+import json
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from functools import lru_cache
 from logging import getLogger
@@ -11,9 +12,7 @@ from typing import TYPE_CHECKING, Callable
 from ..core import disqualification as dq
 from ..core import score
 from ..core.grader import Graded
-from ..core.score import validate_score
 from ..data import load_structured_data
-from ..numeric import to_decimal
 from ..protocols import JSON
 
 log = getLogger("chalk.autograder")
@@ -65,6 +64,16 @@ def extract_from_text(src: str) -> Graded:
     if src.strip() == "":
         return Graded(dq.Error(), feedback="Empty grading result.")
 
+    clean_src = src.strip()
+    try:
+        data = json.loads(clean_src)
+    except json.JSONDecodeError:
+        if clean_src.startswith("{") or clean_src.startswith("["):
+            log.warning("Invalid JSON format in result: %s", clean_src)
+            return Graded(dq.Error(), feedback=clean_src)
+    else:
+        return extract_from_primitive(data)
+
     [score_data, *rest] = src.splitlines()
     feedback = "\n".join(rest).strip() or None
     score_data = score_data.strip().lower().removeprefix("score:").strip()
@@ -80,7 +89,7 @@ def extract_from_text(src: str) -> Graded:
     else:
         try:
             value = Decimal(score_data)
-        except ValueError:
+        except (ValueError, InvalidOperation):
             log.warning("Invalid score format: %s", score_data)
             return Graded(dq.Error(), feedback=src)
         else:
@@ -256,34 +265,49 @@ def dict_extractor(keys: tuple[str, ...]) -> Callable[[DictConverter], DictConve
     return decorator
 
 
-@dict_extractor(("score", "max", "feedback"))
-@dict_extractor(("score", "max"))
 @dict_extractor(("score", "feedback"))
 @dict_extractor(("score",))
 def _(data: dict[str, JSON], /) -> Graded:
-    score = data.get("score")
+    # score = data.get("score")
+    # feedback = data.get("feedback")
+    # feedback = feedback.strip() if isinstance(feedback, str) else None
+    # # Convert relative values
+    # if isinstance(score, str) and score.strip().endswith("%"):
+    #     score = score.strip().removesuffix("%")
+    #     try:
+    #         score_value = to_decimal(score) / 100
+    #     except ValueError:
+    #         log.warning("Invalid score format: %s", score)
+    #         return Graded(dq.Error(), feedback=feedback)
+    #     else:
+    #         return Graded(score_value, feedback=feedback)
+
+    # # Now we extract both the score and the max score, if they are present.
+    # try:
+    #     score = validate_score(score, out_of_bound=True)
+    # except ValueError:
+    #     log.warning("Invalid score format: %s", score)
+    #     return Graded(dq.Error(), feedback=feedback)
+    # else:
+    #     return Graded(score, feedback=feedback)
+    raise NotImplementedError
+
+
+@dict_extractor(("pass", "fail", "feedback"))
+@dict_extractor(("pass", "fail"))
+def _(data: dict[str, JSON], /) -> Graded:
+    passed = _getchecked(data, "pass", int)
+    failed = _getchecked(data, "fail", int)
     feedback = data.get("feedback")
-    feedback = feedback.strip() if isinstance(feedback, str) else None
 
-    # Convert relative values
-    if isinstance(score, str) and score.strip().endswith("%"):
-        score = score.strip().removesuffix("%")
-        try:
-            score_value = to_decimal(score) / 100
-        except ValueError:
-            log.warning("Invalid score format: %s", score)
-            return Graded(dq.Error(), feedback=feedback)
-        else:
-            return Graded(score_value, feedback=feedback)
+    if feedback is not None and not isinstance(feedback, str):
+        raise ValueError("Invalid feedback format: must be a string.")
 
-    # Now we extract both the score and the max score, if they are present.
-    try:
-        score = validate_score(score, out_of_bound=True)
-    except ValueError:
-        log.warning("Invalid score format: %s", score)
-        return Graded(dq.Error(), feedback=feedback)
-    else:
-        return Graded(score, feedback=feedback)
+    total = passed + failed
+    if total == 0:
+        return Graded(dq.Error(), feedback="no tests collected")
+
+    return Graded(score=Fraction(passed, total), feedback=feedback)
 
 
 @lru_cache

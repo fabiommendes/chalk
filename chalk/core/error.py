@@ -5,6 +5,8 @@ import sys
 from typing import Any, NoReturn, cast
 
 import rich
+from rich.console import RenderableType
+from rich.text import Text
 
 ARE_YOU_SURE_MSG = "Are you sure you're in a Chalk project?"
 
@@ -13,6 +15,15 @@ class ChalkException(Exception):
     """
     Base class for all user-facing Chalk exceptions.
     """
+
+    def __rich__(self) -> RenderableType:
+        """
+        Return a rich Text object representing the exception message.
+
+        This is the final message that will be displayed to the user, so it
+        should be clear and concise.
+        """
+        return Text.assemble(("Error: ", "bold red"), str(self))
 
 
 class RosterNotFoundError(FileNotFoundError, ChalkException):

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections import defaultdict
 from decimal import Decimal
-from typing import TYPE_CHECKING, Iterable, Iterator, Mapping, TypeIs, cast
+from typing import TYPE_CHECKING, Iterable, Iterator, Mapping, TypeIs
 
 import errorz as rz
 import opt
+from frozendict import frozendict
 from rich.console import RenderableType
 from rich.text import Text
+
+from chalk.data import yaml
 
 from ..core import disqualification as dis
 from ..core import models
@@ -74,7 +77,10 @@ class Association(BaseQuestion[models.Association, AssociationAnswer]):
     # Validation
     #
     def validate_answer(self, value: AnyAnswer) -> AssociationAnswer:
-        if not isinstance(value, dict):
+        if isinstance(value, str):
+            value = yaml.loads(value)
+
+        if not isinstance(value, (dict, frozendict)):
             raise type_error(f"Expected a dict[str, str], got {type(value).__name__}.")
 
         # All key/values in the dict are have valid types
@@ -86,7 +92,7 @@ class Association(BaseQuestion[models.Association, AssociationAnswer]):
                 msg = f"Expected a dict[str, str], got a value of type {type(v).__name__}."
                 raise type_error(msg)
 
-        val = cast(AssociationAnswer, value)
+        val = value
 
         # All keys are in the choices
         choice_ids = set(self._choices)
@@ -110,7 +116,7 @@ class Association(BaseQuestion[models.Association, AssociationAnswer]):
                 scopes=["response"],
             )
 
-        return val
+        return frozendict(val)
 
     def iter_issues(
         self,
