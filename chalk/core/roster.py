@@ -246,8 +246,8 @@ class Roster(Mapping[StudentId, Student]):
                 data = table.to_dicts(clear_nones=True)
                 path.write_text(json.dumps(data, indent=2))
             case _:
-                msg = f"Saving {path.suffix} roster is not implemented yet"
-                raise NotImplementedError(msg)
+                msg = f"Saving {path.suffix} roster is not supported"
+                raise ValueError(msg)
 
 
 HEURISTIC_COLUMNS = {

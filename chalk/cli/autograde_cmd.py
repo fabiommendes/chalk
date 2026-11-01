@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.text import Text
 
-from ..core import Classroom, Question, QuestionId, Quiz, Student
+from ..core import Classroom, Question, Student
 from ..core.grader import DEFAULT_TIMEOUT, Grader, GraderKwargs, is_score
 from ..core.score import rich_render_percent
 from ..question import render_answer
@@ -162,14 +162,6 @@ def autograde(
             help="Only run the autograder script without saving grades or feedback",
         ),
     ] = False,
-    no_tui: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            "--console",
-            help="Disable the text-based user interface (TUI)",
-        ),
-    ] = False,
     run: Annotated[
         bool,
         typer.Option(
@@ -213,7 +205,7 @@ def autograde(
             capture_output=not run,
         )
 
-    elif output_format or output_path or no_tui:
+    else:
         question = cls.prompt_question(quiz, question_id)
         run_autograder(
             question,
@@ -225,20 +217,6 @@ def autograde(
             output_format=output_format,
             output_path=output_path,
             auto_yes=auto_yes,
-            keep_failed=keep_failed,
-            force_grading=force_grading,
-            dry_run=dry_run,
-        )
-
-    else:
-        run_autograder_tui(
-            quiz,
-            question_id=question_id,
-            students=students,
-            verbose=verbose,
-            timeout=timeout,
-            auto_yes=auto_yes,
-            keep_files=keep_files,
             keep_failed=keep_failed,
             force_grading=force_grading,
             dry_run=dry_run,
@@ -303,22 +281,6 @@ def run_autograder_debug(
         print()
         if yn_prompt("Continue to next student?", "y") is False:
             break
-
-
-def run_autograder_tui(
-    quiz: Quiz,
-    *,
-    question_id: QuestionId | None,
-    students: list[Student] | None = None,
-    verbose: bool = False,
-    timeout: float = DEFAULT_TIMEOUT,
-    auto_yes: bool = False,
-    keep_files: bool = False,
-    keep_failed: bool = False,
-    force_grading: bool = False,
-    dry_run: bool = False,
-):
-    raise NotImplementedError
 
 
 def run_autograder(

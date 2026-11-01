@@ -231,8 +231,8 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
                     yaml.dump(data, f)
 
             case _:
-                msg = f"{format.upper()} output is not yet implemented"
-                raise NotImplementedError(msg)
+                msg = f"{format.upper()} output is not supported"
+                raise ValueError(msg)
 
     @deprecated("Use rich.print(table.render()) instead.")
     def print(

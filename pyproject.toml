@@ -8,27 +8,17 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "cytoolz>=1.1.0",
     "errorz>=0.2.1",
     "frozendict>=2.4.7",
     "gitignore-lib>=0.1.1",
     "natsort>=8.4.0",
     "optionz>=0.2.0",
     "pandas>=3.0.3",
-    "pandas-stubs>=3.0.0.260204",
-    "pandera[pandas]>=0.31.1",
     "pydantic>=2.13.4",
     "pygments>=2.20.0",
     "pyyaml>=6.0.3",
     "rich>=15.0.0",
-    "taskipy>=1.14.1",
-    "toolz>=1.1.0",
-    "toolz-stubs>=0.4.1",
-    "typeguard>=4.5.2",
     "typer",
-    "types-openpyxl>=3.1.5.20260508",
-    "types-pyyaml>=6.0.12.20260510",
-    "unidecode>=1.4.0",
 ]
 
 [project.scripts]
@@ -48,10 +38,13 @@ dev = [
     "mkdocs-material>=9.6.0",
     "mkdocstrings[python]>=0.30.0",
     "mypy>=2.1.0",
-    "pandera[mypy]>=0.31.1",
+    "pandas-stubs>=3.1.0.261029",
     "pytest>=9.1.0",
     "pytest-cov>=7.1.0",
+    "ruff>=0.17.3",
+    "taskipy>=1.14.1",
     "types-pygments>=2.20.0.20260518",
+    "types-pyyaml>=6.0.12.20261030",
 ]
 
 [tool.taskipy.tasks]

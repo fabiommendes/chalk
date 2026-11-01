@@ -268,29 +268,27 @@ def dict_extractor(keys: tuple[str, ...]) -> Callable[[DictConverter], DictConve
 @dict_extractor(("score", "feedback"))
 @dict_extractor(("score",))
 def _(data: dict[str, JSON], /) -> Graded:
-    # score = data.get("score")
-    # feedback = data.get("feedback")
-    # feedback = feedback.strip() if isinstance(feedback, str) else None
-    # # Convert relative values
-    # if isinstance(score, str) and score.strip().endswith("%"):
-    #     score = score.strip().removesuffix("%")
-    #     try:
-    #         score_value = to_decimal(score) / 100
-    #     except ValueError:
-    #         log.warning("Invalid score format: %s", score)
-    #         return Graded(dq.Error(), feedback=feedback)
-    #     else:
-    #         return Graded(score_value, feedback=feedback)
+    value = data.get("score")
+    feedback = data.get("feedback")
+    if feedback is not None and not isinstance(feedback, str):
+        raise ValueError("Invalid feedback format: must be a string.")
+    feedback = feedback.strip() or None if feedback else None
 
-    # # Now we extract both the score and the max score, if they are present.
-    # try:
-    #     score = validate_score(score, out_of_bound=True)
-    # except ValueError:
-    #     log.warning("Invalid score format: %s", score)
-    #     return Graded(dq.Error(), feedback=feedback)
-    # else:
-    #     return Graded(score, feedback=feedback)
-    raise NotImplementedError
+    # Percentages, e.g. "80%"
+    if isinstance(value, str) and value.strip().endswith("%"):
+        try:
+            percent = Decimal(value.strip().removesuffix("%").strip())
+        except InvalidOperation:
+            log.warning("Invalid score format: %s", value)
+            return Graded(dq.Error(), feedback=feedback)
+        return Graded(score.validate_score(percent / 100, out_of_bound=True), feedback=feedback)
+
+    try:
+        result = score.validate_score(value, out_of_bound=True)
+    except (ValueError, TypeError):
+        log.warning("Invalid score format: %s", value)
+        return Graded(dq.Error(), feedback=feedback)
+    return Graded(result, feedback=feedback)
 
 
 @dict_extractor(("pass", "fail", "feedback"))

@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 log = getLogger(__name__)
 
 NO_GRADE = None
-SPREADSHEET_EXTENSIONS = {".csv", ".xlsx"}
+SPREADSHEET_EXTENSIONS = {".csv"}
 STRUCTURED_DATA_EXTENSIONS = {".json", ".yaml", ".yml"}
 RESERVED_NON_QUIZ_NAMES = {
     "template",

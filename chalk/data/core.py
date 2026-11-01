@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import (
     IO,
     Any,
-    Collection,
     Literal,
     Sequence,
     TypeIs,
@@ -39,7 +38,7 @@ type StructuredData = Data | JSON
 type SpreadsheetData = list[dict[str, Any]]
 
 StructuredFormat = Literal["json", "yaml"]
-SpreadsheetFormat = Literal["csv", "xlsx", "json", "yaml"]
+SpreadsheetFormat = Literal["csv", "json", "yaml"]
 
 STRUCTURED_FORMAT_ALIASES: dict[str, StructuredFormat] = {"yml": "yaml"}
 DEFAULT_BACKUPS: int | bool = False
@@ -55,15 +54,13 @@ def load_spreadsheet(path: Path, /, columns: list[str] | None = None) -> Table[s
         with path.open() as f:
             reader = csv.DictReader(f)
             data = list(reader)
-    elif path.suffix in [".xlsx", ".xls"]:
-        raise NotImplementedError("Excel spreadsheet support is not implemented yet")
     elif path.suffix in [".json", ".yaml", ".yml"]:
         raw_data = load_structured_data(path)
         if not isinstance(raw_data, list):
             raise ValueError(f"Unsupported spreadsheet data: {path.suffix}")
         data = raw_data
     else:
-        raise ValueError(f"Unsupported spreadsheet format: {path.suffix}")
+        raise ValueError(f"Unsupported spreadsheet format: {format}")
 
     for row in data:
         if not isinstance(row, dict):
@@ -162,20 +159,6 @@ def dump_structured_data(
 @overload
 def dump_spreadsheet(
     data: Table[str | None] | Table[str],
-    path: Path,
-    /,
-    *,
-    format: SpreadsheetFormat | None = None,
-    columns: list[str] | None = None,
-    split_by: Collection[str] | None,
-    keep: Sequence[str] | None = None,
-    backup: bool | int = DEFAULT_BACKUPS,
-) -> None: ...
-
-
-@overload
-def dump_spreadsheet(
-    data: Table[str | None] | Table[str],
     path: Path | IO[str] | IO[bytes] | None = None,
     /,
     *,
@@ -193,7 +176,6 @@ def dump_spreadsheet(
     *,
     format: SpreadsheetFormat | None = None,
     columns: list[str] | None = None,
-    split_by: Collection[str] | None = None,
     keep: Sequence[str] | None = None,
     backup: bool | int = DEFAULT_BACKUPS,
 ) -> None:
@@ -203,13 +185,10 @@ def dump_spreadsheet(
     if not data:
         return
 
-    if split_by is not None:
-        raise NotImplementedError("Split by multiple files is not implemented yet")
-
     if format is None and isinstance(path, Path):
         format = validate_spreadsheet_format(path.suffix.removeprefix(".").lower())
 
-    if path is None and format in ("csv", "xlsx"):
+    if path is None and format == "csv":
         fd = io.StringIO()
         dump_spreadsheet(data, fd, columns=columns, backup=backup, format="csv")
         print(fd.getvalue())
@@ -227,13 +206,10 @@ def dump_spreadsheet(
             # Atomic write to avoid data loss if the process is interrupted
             assert path is not None
             write_text(path, stream.getvalue(), rotate=backup)
-        case "xlsx":
-            msg = "Excel spreadsheet support is not implemented yet"
-            raise NotImplementedError(msg)
         case "json" | "yaml":
             dump_structured_data(data.to_dicts(), path, format=format, backup=backup)
         case _:
-            raise ValueError(f"Unsupported spreadsheet format: {path.suffix}")
+            raise ValueError(f"Unsupported spreadsheet format: {format}")
 
 
 def validate_structured_format(format: str) -> StructuredFormat:
@@ -268,7 +244,7 @@ def validate_spreadsheet_format(format: str) -> SpreadsheetFormat:
     if format in get_args(SpreadsheetFormat):
         return cast(SpreadsheetFormat, format)
     else:
-        msg = f"Unsupported spreadsheet format: {format}, expect one of: csv, xlsx"
+        msg = f"Unsupported spreadsheet format: {format}, expect one of: csv, json, yaml"
         raise ValueError(msg)
 
 

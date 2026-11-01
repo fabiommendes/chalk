@@ -153,53 +153,6 @@ def create(
     rich.print(quiz)
 
 
-# ==============================================================================
-# chalk quiz merge ID1 ID2
-# ==============================================================================
-@app.command(name="merge")
-@safe
-def merge(
-    id1: Annotated[
-        str,
-        typer.Argument(
-            ...,
-            help="ID of the first quiz to merge",
-        ),
-    ],
-    id2: Annotated[
-        str,
-        typer.Argument(
-            ...,
-            help="ID of the second quiz to merge",
-        ),
-    ],
-    output_id: Annotated[
-        str | None,
-        typer.Option(
-            ...,
-            "-o",
-            "--output",
-            help="ID for the merged quiz (defaults to ID1)",
-        ),
-    ] = None,
-) -> None:
-    """
-    Merge two quizzes into a single quiz file.
-
-    This is useful for merging changes from different branches or collaborators.
-    """
-    cfg = Classroom.load()
-    quiz1 = cfg.prompt_quiz(id1)
-    quiz2 = cfg.prompt_quiz(id2)
-
-    if output_id is None:
-        output_id = id1 + "-merged"
-
-    msg = f"Merging quizzes '{quiz1.name}' and '{quiz2.name}' into '{output_id}'..."
-    print(msg)
-    raise NotImplementedError("Quiz merging is not yet implemented")
-
-
 #
 # Utilities
 #
