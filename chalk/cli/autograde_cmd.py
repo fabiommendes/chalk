@@ -44,15 +44,18 @@ def autograde(
         ),
     ] = None,
     timeout: Annotated[
-        float,
+        float | None,
         typer.Option(
             ...,
             "-t",
             "--timeout",
             metavar="SECONDS",
-            help="Timeout for the autograder script (in seconds)",
+            help=(
+                "Timeout for the autograder script (in seconds). Defaults to "
+                f"autograder.timeout in conf.yaml, or {DEFAULT_TIMEOUT:g}."
+            ),
         ),
-    ] = DEFAULT_TIMEOUT,
+    ] = None,
     auto_yes: Annotated[
         bool,
         typer.Option(
@@ -231,7 +234,7 @@ def run_autograder_debug(
     students: list[Student],
     keep_files: bool,
     verbose: bool,
-    timeout: float,
+    timeout: float | None,
     capture_output: bool = True,
 ) -> None:
     grader: Grader[Any] | None = question.get_grader()
@@ -289,7 +292,7 @@ def run_autograder(
     students: list[Student] | None = None,
     keep_files: bool = False,
     verbose: bool = False,
-    timeout: float = DEFAULT_TIMEOUT,
+    timeout: float | None = None,
     sort: str | None = None,
     output_format: str | None = None,
     output_path: Path | None = None,

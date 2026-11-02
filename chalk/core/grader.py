@@ -95,7 +95,7 @@ class Graded(NamedTuple):
 
 class GraderKwargs(TypedDict, total=False):
     debug: bool
-    timeout: float
+    timeout: float | None
     keep_files: bool
     keep_failed: bool
     capture_output: bool

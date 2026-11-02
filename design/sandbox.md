@@ -378,9 +378,10 @@ questions:
 
 1. ~~Corrigir os bugs 2, 3 e 5 do "Estado atual".~~ Feito (`b051cf0`).
 2. ~~Resultado só pelo arquivo em `$CHALK_RESULT`, fora da área do aluno;
-   leitor JUnit; nota `3/4` no formato texto.~~ Feito. Falta: limites de
-   memória e tamanho da resposta; chaves `profile` e `sandbox`; perfil
-   `regex`.
+   leitor JUnit; nota `3/4` no formato texto.~~ Feito. Limites (`memory`,
+   `file_size`, `answer_size`), chaves `profile` e `sandbox` (só `none`) e
+   perfil `regex` também feitos. Limite de processos fica para o sandbox:
+   `RLIMIT_NPROC` conta todos os processos do usuário, não só os do aluno.
 3. Backend `bwrap` com o perfil `script`: o script atual passa a rodar
    isolado, com relatório fora da área do aluno.
 4. Perfil `python-pytest` com preparo em cache, nota pela lista coletada e

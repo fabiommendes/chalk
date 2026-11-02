@@ -67,6 +67,8 @@ class Textual(BaseQuestion[models.Textual, TextualAnswer]):
             return answer
 
     def get_grader(self) -> Grader[str] | None:
+        if (grader := self.get_profile_grader()) is not None:
+            return grader
         if self.regex_grader is not None:
             from ..autograder.regex_grader import RegexGrader
 

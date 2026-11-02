@@ -287,6 +287,18 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             return None
         return path
 
+    def get_profile_grader(self) -> Grader[Any] | None:
+        """
+        Grader of the autograder profile that does not run a script, if the
+        question declares one.
+        """
+        conf = self.get_autograder()
+        if conf.profile == "regex":
+            from ..autograder.regex_answer import RegexAnswerGrader
+
+            return RegexAnswerGrader(conf)
+        return None
+
     def get_grader(self) -> Grader[Answer] | None:
         """
         Get the default Grader object for this question, which can be used to
@@ -571,7 +583,7 @@ class Generic(BaseQuestion[models.GenericQuestion, AnyAnswer]):
     """
 
     def get_grader(self) -> Grader[Any] | None:
-        return None
+        return self.get_profile_grader()
 
     def validate_answer(self, answer: AnyAnswer) -> AnyAnswer:
         return answer

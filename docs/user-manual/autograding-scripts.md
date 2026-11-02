@@ -145,3 +145,68 @@ Chalk never reads the score from the script output. Standard output and
 standard error go to the grading log (`chalk.stdout` in the working
 directory), and a copy of the result is saved as `chalk.result`. A script
 that writes no result file gets an error score.
+
+
+## Limits
+
+Every run has a timeout: `autograder.timeout` in `conf.yaml`, overridden by
+`chalk autograde --timeout`, with a default of 30 seconds. When it expires,
+chalk kills the script and every process it started.
+
+Other limits go under `autograder.limits`. Sizes accept units such as
+`512MB` or `1GiB`.
+
+```yaml
+questions:
+  - id: q1
+    autograder:
+      timeout: 60
+      limits:
+        memory: 1GB        # address space of each process (RLIMIT_AS)
+        file_size: 50MB    # largest file a process can write
+        answer_size: 1MB   # larger text answers are rejected (default 1 MiB)
+```
+
+`memory` limits virtual memory, not resident memory. Node, the JVM and Go
+reserve large virtual areas at startup, so give them a generous value or
+leave `memory` unset.
+
+The environment of the script only has `PATH`, `HOME`, the locale variables
+and a few others. Add more with `autograder.pass_env`:
+
+```yaml
+    autograder:
+      pass_env: [DATABASE_URL]
+```
+
+
+## Sandbox
+
+Chalk does not isolate the script yet. `autograder.sandbox: none` declares
+that the script only reads the answer (a regex, a string, code parsed
+without running it). The `bwrap` and `podman` values are reserved for the
+sandbox and fail for now. Until they exist, a script that runs the
+student's code must isolate it on its own.
+
+
+## Regex answers
+
+When the answer is a regular expression, the `regex` profile grades it
+without a script. List the examples the answer must match and must not
+match:
+
+```yaml
+questions:
+  - id: q3
+    type: text
+    autograder:
+      profile: regex
+      regex_mode: full   # the whole example must match; "search" finds it anywhere
+      match: [ana@unb.br, x.y@a.com]
+      reject: ["@unb.br", "ana@"]
+```
+
+The score is the fraction of examples with the expected outcome, and the
+feedback lists the others. The regex runs in a separate process with a
+timeout of one second per example, so a regex with catastrophic
+backtracking only fails the examples where it hangs.

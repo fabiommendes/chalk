@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import pty
 import re
+import resource
 import shutil
 import signal
 import subprocess
@@ -17,7 +18,7 @@ from typing import Any
 
 from chalk.core import disqualification as dq
 
-from ..core import Disqualification, QuestionId, QuizId, StudentId
+from ..core import Disqualification, QuestionId, QuizId, StudentId, models
 from ..core.answer import AnyAnswer, serialize_any_answer
 from ..core.grader import Graded
 from ..core.score import Score
@@ -79,6 +80,7 @@ class ScriptRunner:
         timeout: float,
         on_output_line: Callable[[str], Any] | None = None,
         capture_output: bool = True,
+        limits: models.Limits | None = None,
     ) -> None:
         self._chalk_env = env
         self.timeout = timeout
@@ -113,6 +115,7 @@ class ScriptRunner:
             # Own process group, so a timeout kills the whole tree and not
             # only the shell.
             start_new_session=True,
+            preexec_fn=_rlimit_setter(limits) if limits else None,
         )
 
     def __del__(self) -> None:
@@ -299,6 +302,27 @@ class ChalkEnv:
             if var in os.environ:
                 base[var] = os.environ[var]
         return base
+
+
+def _rlimit_setter(limits: models.Limits) -> Callable[[], None] | None:
+    """
+    Function that applies the given limits in the child process, before the
+    script starts. The limits are inherited by every process the script
+    starts.
+    """
+    pairs = [
+        (resource.RLIMIT_AS, limits.memory),
+        (resource.RLIMIT_FSIZE, limits.file_size),
+    ]
+    pairs = [(kind, int(value)) for kind, value in pairs if value is not None]
+    if not pairs:
+        return None
+
+    def apply() -> None:
+        for kind, value in pairs:
+            resource.setrlimit(kind, (value, value))
+
+    return apply
 
 
 def remove_ansi_codes(src: str) -> str:

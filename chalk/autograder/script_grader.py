@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core import Question, StudentId, models
+from ..core import disqualification as dq
 from ..core.grader import DEFAULT_TIMEOUT, Graded, Grader
 from .repo import Repo
 from .script_runner import ChalkEnv, ScriptRunner
@@ -35,7 +36,7 @@ class ScriptGrader(Grader[str | Path]):
         /,
         *,
         debug: bool = False,
-        timeout: float = DEFAULT_TIMEOUT,
+        timeout: float | None = None,
         keep_files: bool = False,
         keep_failed: bool = False,
         on_output_line: Callable[[str], None] | None = None,
@@ -43,15 +44,26 @@ class ScriptGrader(Grader[str | Path]):
         **kwargs,
     ) -> Graded | None:
 
+        if timeout is None:
+            timeout = self.conf.timeout or DEFAULT_TIMEOUT
+        if self.conf.sandbox not in (None, "none"):
+            msg = f"sandbox {self.conf.sandbox!r} is not implemented yet; use 'none'"
+            raise NotImplementedError(msg)
+
+        limit = self.conf.limits.answer_size
         if isinstance(answer, Path):
             if not answer.exists():
                 log.warning(f"Answer path {answer} does not exist for student {id}")
                 return None
             elif answer.is_file():
+                if answer.stat().st_size > limit:
+                    return answer_too_large(limit)
                 answer = data = answer.read_text()
             else:
                 data = str(answer)
         else:
+            if len(answer.encode()) > limit:
+                return answer_too_large(limit)
             data = answer
 
         with self.student_repository(id, answer, clear=not keep_files and not keep_failed) as repo:
@@ -69,6 +81,7 @@ class ScriptGrader(Grader[str | Path]):
                 timeout=timeout,
                 on_output_line=on_output_line,
                 capture_output=capture_output,
+                limits=self.conf.limits,
             )
             result = runner.run()
 
@@ -153,3 +166,7 @@ class ScriptGrader(Grader[str | Path]):
 
     def _answer_path(self) -> str:
         return str(self.conf.answer or "answer.txt")
+
+
+def answer_too_large(limit: int) -> Graded:
+    return Graded(dq.InvalidInput(), feedback=f"The answer is larger than {limit} bytes.")

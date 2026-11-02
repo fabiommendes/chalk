@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 from pydantic import (
     BaseModel,
     BeforeValidator,
+    ByteSize,
     ConfigDict,
     Discriminator,
     Field,
@@ -248,6 +249,32 @@ class Repo(BaseQuestion):
 # ==============================================================================
 # Other configuration models
 # ==============================================================================
+class Limits(BaseModel):
+    """
+    Resource limits of an autograder run. Sizes accept units, as in "512MB"
+    or "1GiB".
+    """
+
+    memory: Annotated[
+        ByteSize | None,
+        Field(
+            description=(
+                "Address space limit of the script and each process it starts (RLIMIT_AS). "
+                "Runtimes that reserve large virtual areas, such as Node and the JVM, need "
+                "a generous value."
+            ),
+        ),
+    ] = None
+    file_size: Annotated[
+        ByteSize | None,
+        Field(description="Largest file the script or its processes can write (RLIMIT_FSIZE)."),
+    ] = None
+    answer_size: Annotated[
+        ByteSize,
+        Field(description="Largest text answer that is graded. Larger answers are rejected."),
+    ] = ByteSize(1024 * 1024)
+
+
 class Autograder(BaseModel):
     answer: Annotated[
         str,
@@ -304,6 +331,43 @@ class Autograder(BaseModel):
             ),
         ),
     ] = []
+    profile: Annotated[
+        Literal["script", "regex"] | None,
+        Field(
+            description=(
+                "How the answer is graded. 'script' runs the autograder script; 'regex' "
+                "tests a regex answer against the examples in `match` and `reject`. By "
+                "default, 'script' when the question has a script."
+            ),
+        ),
+    ] = None
+    sandbox: Annotated[
+        Literal["none", "bwrap", "podman"] | None,
+        Field(
+            description=(
+                "Isolation of the autograder run. 'none' is for scripts that only read the "
+                "answer. Only 'none' is implemented for now."
+            ),
+        ),
+    ] = None
+    limits: Limits = Field(default_factory=Limits)
+    match: Annotated[
+        list[str],
+        Field(description="regex profile: examples the answer must match."),
+    ] = []
+    reject: Annotated[
+        list[str],
+        Field(description="regex profile: examples the answer must not match."),
+    ] = []
+    regex_mode: Annotated[
+        Literal["full", "search"],
+        Field(
+            description=(
+                "regex profile: 'full' requires the regex to match the whole example, "
+                "'search' anywhere in it."
+            ),
+        ),
+    ] = "full"
     command: Annotated[
         str | None,
         Field(
