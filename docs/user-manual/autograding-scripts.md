@@ -84,11 +84,8 @@ variables are described in the following table:
 | -------------------- | ------------ | -------------------------------------------------------- |
 | CHALK_ROOT           |              | Absolute path to the working directory of the submission |
 | -------------------- | ------------ | -------------------------------------------------------- |
-| CHALK_RESULT         | `graded.*`   | Name of the file  where the grading script               |
-|                      |              | should write the results.                                |
-|                      |              |                                                          |
-|                      |              | Chalk can understand results in JSON, YAML or plain      |
-|                      |              | text.                                                    |
+| CHALK_RESULT         |              | Absolute path of the file where the grading script       |
+|                      |              | writes the result (see "Results" below).                 |
 | -------------------- | ------------ | -------------------------------------------------------- |
 | CHALK_ANSWER         | `answer.txt` | Name of the file where the student's answer is saved     |
 | -------------------- | ------------ | -------------------------------------------------------- |
@@ -119,43 +116,32 @@ of a `chalk.json` file:
 > and so on. In most cases, we will use autograder to grade programming quizzes, 
 > or some kind of text-based submission, so the difference is irrelevant.
 
-The script can pass the results back to chalk writing back to the file 
-specified in the `CHALK_RESULT` variable. Chalk will infer the content type based 
-on the file extension, but it accepts JSON, YAML, TOML and plain text. 
-For structured formats like JSON, YAML and TOML, it infers the format based on
-the structure of the parsed document. For simple numeric grades, the document
-may consist of just the corresponding number as a number or string (to preserve decimal 
-precision). 
+## Results
 
-A more sophisticated example is shown below:
+The script writes the result to the file in `CHALK_RESULT`. The file is
+created outside the working directory, so code started from the working
+directory has no reason to touch it. Chalk detects the format from the
+content:
 
-```json
-{
-  "score": 0.75,
-  "feedback": "Good job, but you forgot to handle the edge case when x=0.",
-  "comments": [
-    {
-      "line": 10,
-      "comment": "This function could be optimized by using a dictionary instead of a list."
-    },
-    {
-      "line": 20,
-      "comment": "Consider adding more test cases to cover edge cases."
-    }
-  ]
-}
-```
+- **Plain text.** The first line is the score and the other lines are the
+  feedback shown to the student. The score may be a number (`0.8`), a
+  percentage (`80%`) or a fraction (`3/4`).
 
-Alternativelly, the grading script may output the results to stdout. Chalk
-will try to parse it if no `CHALK_RESULT` file is found. Chalk also ignores
-all content before the header line `CHALK RESULT`.
+  ```sh
+  echo "3/4" > "$CHALK_RESULT"
+  echo "The edge case x=0 is not handled." >> "$CHALK_RESULT"
+  ```
 
+- **JSON.** `{"score": 0.75, "feedback": "..."}`, `{"pass": 3, "fail": 1}`,
+  or a report from `pytest-json-report`.
+- **JUnit XML.** Any file that starts with `<`. The score is passed tests
+  over passed plus failed plus errored ones; skipped tests do not count.
+  The feedback lists the tests that did not pass. Most test runners write
+  JUnit: `pytest --junit-xml="$CHALK_RESULT"`,
+  `elm-test --report junit > "$CHALK_RESULT"`, jest with `jest-junit`,
+  `cargo nextest`, `gotestsum`.
 
-## External tools
-
-Chalk interops with some external tools that might be useful in a grading
-context (specially for programming quizzes). ...
-
-# Pytest support 
-
-Chalk understands the output of pytest output. 
+Chalk never reads the score from the script output. Standard output and
+standard error go to the grading log (`chalk.stdout` in the working
+directory), and a copy of the result is saved as `chalk.result`. A script
+that writes no result file gets an error score.

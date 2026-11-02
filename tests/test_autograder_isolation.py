@@ -52,7 +52,7 @@ def wait_dead(pid: int) -> bool:
 class TestEnvironment:
     def test_secrets_are_not_passed(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setenv("GITHUB_TOKEN", "secret")
-        _, work = run_script(tmp_path, "env > env.txt\necho 1 > graded.txt\n")
+        _, work = run_script(tmp_path, 'env > env.txt\necho 1 > "$CHALK_RESULT"\n')
         env = (work / "env.txt").read_text()
         assert "GITHUB_TOKEN" not in env
         assert "PATH=" in env
@@ -61,7 +61,7 @@ class TestEnvironment:
     def test_pass_env_adds_variables(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setenv("MY_SERVER", "localhost:8000")
         _, work = run_script(
-            tmp_path, "env > env.txt\necho 1 > graded.txt\n", pass_env=("MY_SERVER",)
+            tmp_path, 'env > env.txt\necho 1 > "$CHALK_RESULT"\n', pass_env=("MY_SERVER",)
         )
         assert "MY_SERVER=localhost:8000" in (work / "env.txt").read_text()
 
@@ -75,7 +75,9 @@ class TestProcessTree:
         assert wait_dead(int((work / "child.pid").read_text()))
 
     def test_background_processes_die_after_exit(self, tmp_path) -> None:
-        _, work = run_script(tmp_path, "sleep 30 &\necho $! > child.pid\necho 1 > graded.txt\n")
+        _, work = run_script(
+            tmp_path, 'sleep 30 &\necho $! > child.pid\necho 1 > "$CHALK_RESULT"\n'
+        )
         assert wait_dead(int((work / "child.pid").read_text()))
 
 

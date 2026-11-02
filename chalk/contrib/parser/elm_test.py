@@ -42,7 +42,7 @@ def main(
         typer.echo(f"Error parsing Elm tests: {e}", err=True)
         raise typer.Exit(code=1)
 
-    json_data = "CHALK_RESULT: " + json.dumps(result)
+    json_data = json.dumps(result)
 
     if output is not None:
         output.write_text(json_data)

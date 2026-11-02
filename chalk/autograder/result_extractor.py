@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
@@ -13,7 +14,6 @@ from typing import TYPE_CHECKING
 from ..core import disqualification as dq
 from ..core import score
 from ..core.grader import Graded
-from ..data import load_structured_data
 from ..protocols import JSON
 
 log = getLogger("chalk.autograder")
@@ -27,32 +27,53 @@ __all__ = [
     "extract_result_from_file",
 ]
 
+#: Larger result files are rejected instead of parsed.
+MAX_RESULT_SIZE = 10 * 1024 * 1024
+
 
 def extract_result_from_file(path: Path, /) -> Graded:
     """
-    Extract the score and feedback from the given result file and update the
-    response accordingly.
+    Extract the score and feedback from the given result file.
+
+    The format is detected from the content: JUnit XML (starts with "<"),
+    JSON, or plain text with the score in the first line and the feedback in
+    the others.
     """
-    if path.exists() and path.suffix in {".json", ".yaml", ".yml"}:
-        data = load_structured_data(path)
-        return extract_from_primitive(data)
+    if path.stat().st_size > MAX_RESULT_SIZE:
+        return Graded(dq.Error(), feedback="Grading result is too large.")
+    src = path.read_text(errors="replace")
+    if src.lstrip().startswith("<"):
+        return extract_from_junit(src)
+    return extract_from_text(src)
 
-    if path.exists() and path.suffix == ".txt":
-        src = path.read_text()
-        return extract_from_text(src)
 
-    base = path.parent / path.stem
-    for suffix in [".json", ".yaml", ".yml", ".txt", ""]:
-        path = base.with_suffix(suffix)
-        if path.exists():
-            if suffix in {".json", ".yaml", ".yml"}:
-                data = load_structured_data(path)
-                return extract_from_primitive(data)
-            elif suffix in {".txt", ""}:
-                src = path.read_text()
-                return extract_from_text(src)
+def extract_from_junit(src: str) -> Graded:
+    """
+    Extract the score from a JUnit XML report.
 
-    raise NotImplementedError(f"Could not extract result from {path}.")
+    The score is passed / (passed + failed + errors); skipped tests do not
+    count. The feedback lists the tests that did not pass.
+    """
+    try:
+        root = ET.fromstring(src)
+    except ET.ParseError as e:
+        return Graded(dq.Error(), feedback=f"Invalid JUnit report: {e}")
+
+    passed = 0
+    failed: list[str] = []
+    for case in root.iter("testcase"):
+        if case.find("skipped") is not None:
+            continue
+        name = ".".join(filter(None, [case.get("classname"), case.get("name")]))
+        if case.find("failure") is not None or case.find("error") is not None:
+            failed.append(name)
+        else:
+            passed += 1
+
+    if passed + len(failed) == 0:
+        return Graded(dq.Error(), feedback="no tests collected")
+    feedback = "Failed tests:\n" + "\n".join(f"- {n}" for n in failed) if failed else None
+    return Graded(Fraction(passed, passed + len(failed)), feedback=feedback)
 
 
 def extract_from_text(src: str) -> Graded:
@@ -67,7 +88,7 @@ def extract_from_text(src: str) -> Graded:
 
     clean_src = src.strip()
     try:
-        data = json.loads(clean_src)
+        data = json.loads(clean_src, parse_float=Decimal)
     except json.JSONDecodeError:
         if clean_src.startswith("{") or clean_src.startswith("["):
             log.warning("Invalid JSON format in result: %s", clean_src)
@@ -79,7 +100,15 @@ def extract_from_text(src: str) -> Graded:
     feedback = "\n".join(rest).strip() or None
     score_data = score_data.strip().lower().removeprefix("score:").strip()
 
-    if score_data.endswith("%"):
+    if "/" in score_data:
+        num, _, den = score_data.partition("/")
+        try:
+            value = Fraction(int(num), int(den))
+        except (ValueError, ZeroDivisionError):
+            log.warning("Invalid score format: %s", score_data)
+            return Graded(dq.Error(), feedback=src)
+        return Graded(value, feedback)
+    elif score_data.endswith("%"):
         try:
             value = Decimal(score_data[:-1].strip()) / 100
         except ValueError:
@@ -106,7 +135,7 @@ def extract_from_primitive(data: JSON) -> Graded:
     # Try atomic values
     if data is None:
         return Graded(dq.Error(), feedback="Empty grading result.")
-    if isinstance(data, (int, float)):
+    if isinstance(data, (int, float, Decimal)):
         return Graded(score.score(data, out_of_bound=True), feedback=None)
 
     if isinstance(data, dict):
