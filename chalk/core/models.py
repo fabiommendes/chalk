@@ -185,6 +185,9 @@ class BaseQuestion(BaseModel):
     ] = None
     autograder: Autograder | None = None
     answer_suffix: str | None = None
+    #: Path to an mdq file outside <quiz>/questions/, relative to the quiz
+    #: directory (e.g. ../questions/recursion/01.md in a codehood course).
+    source: str | None = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):

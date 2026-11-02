@@ -146,7 +146,9 @@ class Quiz:
                     f"conf.yaml cannot declare a type ({conf.type!r})"
                 )
                 raise ValueError(msg)
-            document = load_mdq_document(path, question_id)
+            document = load_mdq_document(
+                path, question_id, check_id=conf is None or conf.source is None
+            )
             generic = cast(models.GenericQuestion, conf or models.GenericQuestion(id=question_id))
             question = MdqQuestion(question_id, generic, document, path=path, quiz=self)
         elif conf is not None:
@@ -181,10 +183,12 @@ class Quiz:
 
     def get_question_files(self) -> dict[QuestionId, Path]:
         """
-        Map the id of each question defined in <quiz>/questions/ to its file.
+        Map the id of each question defined in <quiz>/questions/, or by a
+        `source` entry in conf.yaml, to its mdq file.
 
         Raises:
-            ValueError: two files define the same question.
+            ValueError: two files define the same question or a source does
+                not exist.
         """
         if self._question_files is not None:
             return self._question_files
@@ -199,6 +203,20 @@ class Quiz:
                     msg = f"question {self.id}/{id} is defined twice: {found[id].name}, {path.name}"
                     raise ValueError(msg)
                 found[id] = path
+
+        for conf in self._conf.questions or ():
+            if conf.source is None:
+                continue
+            if conf.id in found:
+                msg = (
+                    f"question {self.id}/{conf.id} is defined twice: "
+                    f"{found[conf.id].name}, source {conf.source}"
+                )
+                raise ValueError(msg)
+            path = (self.root / conf.source).resolve()
+            if not path.is_file():
+                raise ValueError(f"{self.id}/{conf.id}: source {conf.source} not found")
+            found[conf.id] = path
 
         self._question_files = found
         return found

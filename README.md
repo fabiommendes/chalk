@@ -90,7 +90,14 @@ questions:
     format: python
   - id: q5
     type: repo         # the answer is a directory, graded by a script
+  - id: q6
+    source: ../questions/recursion/01.md  # mdq document from elsewhere
 ```
+
+`source` points to an mdq file outside `<quiz>/questions/`, relative to the
+quiz directory. Use it to reuse questions from the `questions/` bank of a
+codehood course without copying them. The quiz refers to the question by the
+id of its entry, whatever id the file declares.
 
 Answers in `submissions.csv` follow the mdq responses: the id of a choice (or
 its text) for multiple choice, a list of ids such as `a, c` or `[a, c]` for

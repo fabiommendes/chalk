@@ -104,3 +104,42 @@ class TestGrading:
     def test_grader_uses_mdq(self, quiz) -> None:
         grader = quiz.get_question("q2").get_grader()
         assert grader("0001", ["dois", "tres"]).score == Decimal(1)
+
+
+class TestSource:
+    """conf.yaml entries can point to mdq files outside <quiz>/questions/."""
+
+    BANK = "---\nid: capitais/brasil\n---\n\nCapital do Brasil?\n\n- [*] [df] Brasília\n- [ ] [sp] São Paulo\n"
+
+    def _use_source(self, classroom: Path, source: str) -> None:
+        conf = classroom / "p1" / "conf.yaml"
+        entry = f"  - id: q3\n    source: {source}\n"
+        conf.write_text(conf.read_text().replace("  - id: q3\n", entry))
+
+    def test_source_loads_question_from_bank(self, classroom: Path) -> None:
+        bank = classroom / "questions" / "capitais"
+        bank.mkdir(parents=True)
+        (bank / "brasil.md").write_text(self.BANK)
+        self._use_source(classroom, "../questions/capitais/brasil.md")
+
+        quiz = Classroom.load().get_quiz("p1")
+        question = quiz.get_question("q3")
+        assert isinstance(question, MdqQuestion)
+        assert question.type == "multiple-choice"
+        assert question.document.id == "q3"
+        assert quiz.get_question_ids() == ["q1", "q2", "q3"]
+
+    def test_missing_source(self, classroom: Path) -> None:
+        self._use_source(classroom, "../questions/nope.md")
+        with pytest.raises(ValueError, match="not found"):
+            Classroom.load().get_quiz("p1").get_question("q3")
+
+    def test_source_conflicts_with_local_file(self, classroom: Path) -> None:
+        (classroom / "questions").mkdir()
+        (classroom / "questions" / "x.md").write_text(self.BANK)
+        conf = classroom / "p1" / "conf.yaml"
+        conf.write_text(
+            conf.read_text().replace("  - id: q1\n", "  - id: q1\n    source: ../questions/x.md\n")
+        )
+        with pytest.raises(ValueError, match="defined twice"):
+            Classroom.load().get_quiz("p1").get_question_files()

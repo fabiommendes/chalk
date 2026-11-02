@@ -106,12 +106,14 @@ Implementado:
   porcentagem (a mesma escala de `ExamResult.score`), com a chave do roster.
   Preserva as outras colunas, as linhas e o delimitador. O `grades.py` do
   curso lê as colunas em `student.scores`.
+- `source: ../questions/x.md` numa entrada do `conf.yaml` carrega a questão
+  de um arquivo mdq fora de `<quiz>/questions/`, por exemplo do banco do
+  codehood. O caminho é relativo à pasta do quiz. O id da questão no quiz é
+  o da entrada; o id declarado no arquivo é ignorado, porque no banco do
+  codehood ele não segue o nome do arquivo do quiz.
 
 Propostas, ainda sem decisão:
 
-- Quiz do chalk que reaproveita questões do banco `questions/` do codehood
-  (por exemplo, `source: ../questions/x.md` na entrada do `conf.yaml`). Hoje
-  é preciso copiar o arquivo.
 - Ler do codehood a lista de matriculados quando existir `codehood roster`;
   até lá, o roster é mantido à mão ou com `chalk roster import`.
 - Nota de questão aberta corrigida no chalk enviada como `Feedback` do

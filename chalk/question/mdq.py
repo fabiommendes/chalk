@@ -226,13 +226,16 @@ def mdq_question_id(path: Path) -> QuestionId | None:
     return None
 
 
-def load_mdq_document(path: Path, id: QuestionId) -> mdqm.Question:
+def load_mdq_document(path: Path, id: QuestionId, *, check_id: bool = True) -> mdqm.Question:
     """
     Load and validate the mdq question in path.
 
     The document gets ids for all its choices, so responses can refer to
-    them. Raises ValueError if the file is not a valid question or if it
-    declares an id different from its file name.
+    them. Raises ValueError if the file is not a valid question or, when
+    check_id is true, if it declares an id different from the given one.
+    Without check_id, the document id is replaced by the given one: a file
+    from a codehood question bank keeps its own id, but the quiz refers to it
+    by the id of its conf.yaml entry.
     """
     loaded = mdq.load(path, kind="question", ids="fill")
     errors = [d for d in loaded.diagnostics if d.severity == "error"]
@@ -241,9 +244,9 @@ def load_mdq_document(path: Path, id: QuestionId) -> mdqm.Question:
         raise ValueError(f"{path}: {details}")
     document = loaded.document
 
-    if document.id is not None and document.id != id:
+    if check_id and document.id is not None and document.id != id:
         raise ValueError(f"{path}: question id {document.id!r} does not match the file name {id!r}")
-    if document.id is None:
+    if document.id != id:
         document = document.model_copy(update={"id": id})
     return document
 
