@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any, Callable, Iterable, Literal, NamedTuple, Protocol, TypedDict, Unpack, cast
+from typing import Any, Literal, NamedTuple, Protocol, TypedDict, Unpack, cast
 
 import opt
 from rich.columns import Columns

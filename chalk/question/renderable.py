@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Iterable, Protocol
+from typing import Protocol
 
 from rich.columns import Columns
 from rich.console import Group, RenderableType

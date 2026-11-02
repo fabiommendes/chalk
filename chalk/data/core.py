@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Sequence
 from pathlib import Path
 from typing import (
     IO,
     Any,
     Literal,
-    Sequence,
     TypeIs,
     assert_never,
     cast,

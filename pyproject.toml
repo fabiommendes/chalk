@@ -70,8 +70,14 @@ docstring-code-line-length = 80
 max-line-length = 120
 
 [tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
 ignore = [
     "E731", # do not assign a lambda expression, use a def
+    "B008", # typer declares options as function calls in defaults
+    "B905", # zip() without strict=
+    "B904", # raise ... from inside except
+    "B007", # unused loop variables
+    "E501", # long lines are left to the formatter
 ]
 
 [tool.uv.sources]

@@ -1,7 +1,8 @@
 import datetime
 import sys
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Annotated, Iterable
+from typing import Annotated
 
 import opt
 import rich
@@ -125,9 +126,6 @@ def create(
         if quiz_id == quiz.id:
             rich.print("[b red]Quiz already exists[/]", file=sys.stderr)
             raise SystemExit(1)
-
-    quiz_root = cls.root / quiz_id
-    path = quiz_root / "conf.toml"
 
     if question_ids:
         if len(question_ids) == 1 and question_ids[0].isdigit():

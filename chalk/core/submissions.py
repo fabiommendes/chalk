@@ -3,10 +3,11 @@ from __future__ import annotations
 import csv
 import io
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, NamedTuple, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 from weakref import ref
 
 import opt

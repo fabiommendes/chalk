@@ -1,6 +1,7 @@
+from collections.abc import Callable, Mapping
 from functools import cmp_to_key
 from operator import attrgetter
-from typing import Any, Callable, Mapping, Protocol, Self, overload
+from typing import Any, Protocol, Self, overload
 
 from typing_extensions import TypeForm
 

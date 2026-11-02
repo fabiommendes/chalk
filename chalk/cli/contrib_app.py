@@ -1,4 +1,5 @@
 import importlib
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -45,8 +46,8 @@ def contrib(
         module = "chalk.contrib." + module
         mod = importlib.import_module(module)
     except ModuleNotFoundError:
-        print(f"Module '{module}' not found.")
-        return
+        rich.print(f"[b red]Error:[/] module {module!r} not found.", file=sys.stderr)
+        raise typer.Exit(1)
 
     command = get_command(mod.app)
     command.main(ctx.args)
@@ -59,13 +60,13 @@ def list_contrib_modules() -> None:
 
     rich.print("[b]Available contrib modules:[/]")
 
-    base = Path(__file__).parent.parent / "contrib"
-    for base, sub_dirs, names in base.walk():
+    root = Path(__file__).parent.parent / "contrib"
+    for base, _, names in root.walk():
         names[:] = [name for name in names if not name.startswith("_")]
         for name in names:
             if name.endswith(".py") and name != "__init__.py":
                 mod = Path(base) / name.removesuffix(".py")
-                mod = mod.relative_to(base.parent)
+                mod = mod.relative_to(root)
                 mod = str(mod).replace("/", ".")
 
                 pypath = "chalk.contrib." + mod

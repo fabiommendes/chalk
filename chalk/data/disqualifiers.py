@@ -1,8 +1,8 @@
 import subprocess
 import tempfile
+from collections.abc import Callable
 from logging import getLogger
 from pathlib import Path
-from typing import Callable
 
 import opt
 

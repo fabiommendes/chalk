@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Iterator, Literal, TypeIs, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeIs, overload
 
 from rich.console import RenderableType
 from rich.text import Text

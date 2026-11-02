@@ -1,8 +1,9 @@
 import csv
 import shutil
+from collections import Counter
 from functools import wraps
 from pathlib import Path
-from typing import Annotated, Counter, Literal, Protocol, assert_never
+from typing import Annotated, Literal, Protocol, assert_never
 
 import rich
 import typer
@@ -103,7 +104,7 @@ def main(
     not_in_roster: set[GithubId] = set()
 
     try:
-        with open(roster, "r", encoding="utf-8") as f:
+        with open(roster, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 github_id = row["github_username"]

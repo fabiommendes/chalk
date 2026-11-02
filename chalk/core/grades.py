@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -10,8 +11,6 @@ from typing import (
     IO,
     TYPE_CHECKING,
     Any,
-    Callable,
-    Iterable,
     Literal,
     NamedTuple,
     cast,
@@ -449,7 +448,7 @@ class Grades:
                 The value to use for disqualified scores.
         """
         question_id = opt.map(get_id, question)
-        student_id = opt.map(get_id, student)
+        only_student = opt.map(get_id, student)
 
         skip_disqualified = kwargs.get("skip_disqualified", False)
         if kwargs and "disqualified" in kwargs:
@@ -460,7 +459,7 @@ class Grades:
             update_disqualified = False
 
         students = set(self.classroom.roster.keys())
-        for student_id, submission in self._iter_submissions(student_id):
+        for student_id, submission in self._iter_submissions(only_student):
             students.discard(student_id)
 
             for qid, response in self._iter_responses(question_id, submission):
@@ -476,8 +475,10 @@ class Grades:
         if skip_missing:
             return
 
-        questions = set(self.quiz.get_question_ids())
-        for student_id in students:
+        if only_student is not None:
+            students &= {only_student}
+        questions = self.quiz.get_question_ids()
+        for student_id in sorted(students):
             for qid in questions:
                 if question_id is not None and qid != question_id:
                     continue

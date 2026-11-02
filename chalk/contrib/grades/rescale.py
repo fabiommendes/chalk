@@ -46,8 +46,7 @@ def main(
 
     for qid in [question_id] if question_id else quiz.get_question_ids():
         question = opt.unwrap(quiz.get_question(qid))
-        question.value
-        quiz.grades.update_score({qid: lambda _, x: score.div(x, question.value)})
+        quiz.grades.update_score({qid: lambda _, x, q=question: score.div(x, q.value)})
 
     rich.print(quiz.grades)
     quiz.grades.save()

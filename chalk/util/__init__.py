@@ -1,5 +1,6 @@
 from collections import defaultdict
-from typing import Any, Callable, Iterable, Mapping, overload
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, overload
 
 
 @overload

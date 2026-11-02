@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import decimal
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from decimal import Decimal
 from logging import getLogger
-from typing import TYPE_CHECKING, Callable, Generator
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass
@@ -29,7 +30,7 @@ def set_decimal_precision(precision: int) -> None:
 
 
 @contextmanager
-def default_decimal_precision() -> Generator[Callable[[Decimal], Decimal], None, None]:
+def default_decimal_precision() -> Generator[Callable[[Decimal], Decimal]]:
     """
     Get the current global decimal precision for grade rendering.
     """
@@ -48,7 +49,7 @@ def get_decimal_precision() -> int:
     return DECIMAL_PRECISION
 
 
-def get_decimal_context(_memo: dict[int, decimal.Context] = {}) -> decimal.Context:
+def get_decimal_context(_memo: dict[int, decimal.Context] = {}) -> decimal.Context:  # noqa: B006
     """
     Get a decimal context with the current global precision for grade rendering.
     """

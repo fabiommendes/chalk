@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable, Unpack, override
+from typing import Any, Unpack, override
 
 from rich.console import RenderableType
 from rich.text import Text

@@ -1,7 +1,8 @@
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Annotated, Any, Iterable
+from typing import Annotated, Any
 
 import typer
 

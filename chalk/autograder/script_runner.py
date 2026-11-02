@@ -6,10 +6,11 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from chalk.core import disqualification as dq
 
@@ -193,7 +194,7 @@ class ScriptRunner:
         This is a separate method so that it can be overridden in tests.
         """
         if script_path.suffix == ".py":
-            with open(script_path, "r", encoding="utf-8") as f:
+            with open(script_path, encoding="utf-8") as f:
                 first_line = f.readline().strip()
                 if first_line.startswith("#!"):
                     return f"{script_path}"

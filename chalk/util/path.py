@@ -2,9 +2,10 @@ import contextlib
 import io
 import itertools
 import sys
+from collections.abc import Generator, Iterable, Iterator
 from logging import getLogger
 from pathlib import Path
-from typing import IO, Any, Generator, Iterable, Iterator, Literal
+from typing import IO, Any, Literal
 
 import opt
 

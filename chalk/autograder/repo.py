@@ -1,8 +1,9 @@
 import shutil
+from collections.abc import Callable
 from functools import partial
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Callable, Literal, cast
+from typing import Any, Literal, cast
 
 import gitignore
 from rich.console import RenderableType

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, MutableSequence
 from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
@@ -9,8 +10,6 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
-    Iterable,
-    MutableSequence,
     cast,
 )
 

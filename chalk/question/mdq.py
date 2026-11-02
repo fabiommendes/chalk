@@ -8,10 +8,10 @@ what is specific to chalk: value, autograder and answer suffix.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 import mdq
 import mdq.models as mdqm

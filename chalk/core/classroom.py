@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import locale
 import tomllib
+from collections.abc import Callable, Iterable
 from decimal import Decimal
 from functools import cached_property
 from logging import getLogger
@@ -11,8 +12,6 @@ from types import ModuleType
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Iterable,
     Literal,
     NamedTuple,
     Never,

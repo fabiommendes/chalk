@@ -1,8 +1,9 @@
 import builtins
 import re
+from collections.abc import Callable
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 from ..core import disqualification as _disqualification
 from ..core.decimal import as_chalk_decimal

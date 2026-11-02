@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import enum
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import total_ordering
-from typing import Any, Iterable, Literal, Mapping, Self, cast
+from typing import Any, Literal, Self, cast
 
 import rich
 
@@ -134,7 +135,7 @@ class Issue:
         rich.print(render_severity(self.severity, rich_text), end="")
         if self.scopes and rich_text:
             data = "|".join(map(str, self.scopes))
-            rich.print("[bold]\\[{}][/]".format(data), end=": ")
+            rich.print(f"[bold]\\[{data}][/]", end=": ")
         rich.print(f"{self.code}")
 
         if self.message and rich_text:

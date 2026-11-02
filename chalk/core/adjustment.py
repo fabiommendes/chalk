@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import copy
 import re
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Iterable, Literal, TypeGuard, cast, get_args, overload
+from typing import Literal, TypeGuard, cast, get_args, overload
 
 import opt
 

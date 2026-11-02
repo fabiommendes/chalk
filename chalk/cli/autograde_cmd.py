@@ -307,10 +307,9 @@ def run_autograder(
         verbose_level = 1
     if verbose:
         verbose_level = 2
-    interactive = not auto_yes or verbose_level > 0
 
     def log_message(obj: Any, *, level: int, style: str | None = None) -> None:
-        if level < verbose:
+        if level > verbose_level:
             return
         if style:
             obj = Text(str(obj), style=style)

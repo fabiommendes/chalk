@@ -1,16 +1,12 @@
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import redirect_stdout
 from decimal import Decimal
 from pathlib import Path
 from typing import (
     IO,
     Any,
-    Callable,
-    Iterable,
-    Iterator,
     Literal,
-    Mapping,
     Self,
-    Sequence,
     TypeVar,
     cast,
     overload,

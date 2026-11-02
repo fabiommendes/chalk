@@ -1,6 +1,7 @@
 import re
+from collections.abc import Callable
 from decimal import Decimal
-from typing import Any, Callable, NamedTuple, overload
+from typing import Any, NamedTuple, overload
 
 PARENS = re.compile(r"(?P<parens>[()])|(?P<other>[^()]+)")
 NUMBER = re.compile(r"(\s*([+-]?\d+(?:\.\d*)?|\.\d+))")

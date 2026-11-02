@@ -1,6 +1,7 @@
 import io
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Callable
+from typing import Annotated
 
 import opt
 import rich

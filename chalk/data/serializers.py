@@ -1,10 +1,11 @@
 import builtins
 import re
+from collections.abc import Callable
 from decimal import Decimal
 from enum import Enum
 from fractions import Fraction
 from functools import singledispatch
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from ..core import disqualification as _disqualification
 from ..core.decimal import render_decimal

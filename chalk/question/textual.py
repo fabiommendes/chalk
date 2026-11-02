@@ -1,6 +1,7 @@
 import re
+from collections.abc import Iterable
 from functools import lru_cache
-from typing import Any, Iterable, override
+from typing import Any, override
 
 import opt
 from rich.console import RenderableType

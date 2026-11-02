@@ -29,6 +29,15 @@ COMMANDS = [
     "collect p1/q3",
     "autograde p1 q1 --yes",
     "autograde p1 q2 --yes",
+    "codehood grades",
+    "quiz create p2 --name P2 --questions 3",
+    "contrib",
+    "contrib github.classroom --help",
+    "contrib github.roster --help",
+    "contrib github.repo-submissions --help",
+    "contrib grades.rescale --help",
+    "contrib parser.elm-test --help",
+    "contrib data.convert --help",
 ]
 
 

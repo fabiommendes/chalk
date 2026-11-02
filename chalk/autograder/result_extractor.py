@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import itertools
 import json
+from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from functools import lru_cache
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from ..core import disqualification as dq
 from ..core import score
@@ -51,7 +52,7 @@ def extract_result_from_file(path: Path, /) -> Graded:
                 src = path.read_text()
                 return extract_from_text(src)
 
-    raise NotImplementedError("Could not extract result from {}.".format(path))
+    raise NotImplementedError(f"Could not extract result from {path}.")
 
 
 def extract_from_text(src: str) -> Graded:
@@ -127,7 +128,7 @@ def extract_from_primitive(data: JSON) -> Graded:
     except ValueError:
         pass
 
-    raise RuntimeError("Could not extract result from data: {}".format(data))
+    raise RuntimeError(f"Could not extract result from data: {data}")
 
 
 def read_pytest_report(data: JSON) -> Graded:
@@ -317,7 +318,7 @@ def get_valid_keys() -> frozenset[str]:
 def _typecheck[T](v: JSON, typ: type[T], /) -> T:
     if isinstance(v, typ):
         return v
-    raise ValueError("Unexpected type: {}".format(type(v).__name__))
+    raise ValueError(f"Unexpected type: {type(v).__name__}")
 
 
 def _getchecked[T](v: JSON, key: str, typ: type[T], /) -> T:

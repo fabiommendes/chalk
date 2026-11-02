@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from decimal import Decimal
 from logging import getLogger
 from pathlib import Path
@@ -10,8 +10,6 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    Iterable,
-    Iterator,
     Literal,
     assert_never,
     final,

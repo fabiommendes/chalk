@@ -1,9 +1,10 @@
 import tempfile
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from logging import getLogger
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ..core import Question, StudentId, models
 from ..core.grader import DEFAULT_TIMEOUT, Graded, Grader
