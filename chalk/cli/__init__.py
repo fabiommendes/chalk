@@ -3,6 +3,7 @@ import typer
 from . import (
     autograde_cmd,
     clear_app,
+    codehood_app,
     collect_cmd,
     contrib_app,
     grade_cmd,
@@ -45,6 +46,11 @@ app.add_typer(
     question_app.app,
     name="question",
     help="Manage questions for quizzes.",
+)
+app.add_typer(
+    codehood_app.app,
+    name="codehood",
+    help="Exchange data with a codehood course in the same repository.",
 )
 collect_cmd.add_collect_command(app)
 grade_cmd.add_grade_cmd(app)
