@@ -1,0 +1,38 @@
+"""
+Run every non-interactive command against the example classroom.
+
+These tests only check that commands finish without errors. Tests of
+behavior live next to the modules they test.
+"""
+
+import pytest
+from typer.testing import CliRunner
+
+from chalk.cli import app
+
+COMMANDS = [
+    "info",
+    "info --classroom",
+    "info --format json",
+    "roster show",
+    "roster validate --fields name",
+    "roster validate --quiz p1",
+    "quiz list",
+    "question list p1",
+    "question show p1 q1",
+    "question show p1 q2",
+    "question show p1 q3",
+    "show",
+    "show p1",
+    "show p1/q1",
+    "show p1 --grades",
+    "collect p1/q3",
+    "autograde p1 q1 --yes",
+    "autograde p1 q2 --yes",
+]
+
+
+@pytest.mark.parametrize("command", COMMANDS)
+def test_command_runs(classroom, command: str) -> None:
+    result = CliRunner().invoke(app, command.split())
+    assert result.exit_code == 0, result.output

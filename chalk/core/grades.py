@@ -27,6 +27,7 @@ from rich.console import Console, RenderableType
 
 from ..data.protocols import get_id
 from ..table import Table, deprecated
+from ..util import unpack
 from ..util.dataframe import ALL_STATS, DEFAULT_STATS, Stats, grades_dataframe_stats
 from . import models
 from .decimal import chalk_decimal, render_decimal
@@ -83,7 +84,7 @@ class Grades:
     #
     @property
     def quiz(self) -> Quiz:
-        return opt.unpack(self._quiz(), throw=RuntimeError("Quiz reference is dead"))
+        return unpack(self._quiz(), throw=RuntimeError("Quiz reference is dead"))
 
     @property
     def classroom(self) -> Classroom:
@@ -232,7 +233,7 @@ class Grades:
         if value is None:
             return None
         if isinstance(question, QuestionId):
-            question = opt.unpack(
+            question = unpack(
                 self.quiz.get_question(question),
                 throw=ValueError(f"Invalid question id: {question}"),
             )

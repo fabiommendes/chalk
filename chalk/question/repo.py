@@ -23,10 +23,6 @@ class Repo(BaseQuestion[models.Repo, RepoAnswer]):
     different forms like plain text, code snippets, mathematical formulas, etc.
     """
 
-    @property
-    def plagiarism(self) -> models.Plagiarism | None:
-        return self._conf.plagiarism
-
     def get_answer_extension(self, default: str | None = None) -> str:
         return ""
 

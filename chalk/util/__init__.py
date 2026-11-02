@@ -118,3 +118,12 @@ def from_dict_of_lists[K, V](d: Mapping[K, Iterable[V]]) -> list[dict[K, V]]:
     keys = d.keys()
     values = zip(*d.values())
     return [dict(zip(keys, v)) for v in values]
+
+
+def unpack[T](value: T | None, /, *, throw: BaseException) -> T:
+    """
+    Return value, or raise the given exception if it is None.
+    """
+    if value is None:
+        raise throw
+    return value

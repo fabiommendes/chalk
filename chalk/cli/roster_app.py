@@ -352,7 +352,7 @@ def validate_fields(roster: Roster, fields: set[str]) -> None:
 
 
 def validate_quiz(roster: Roster, quiz: Quiz) -> None:
-    submissions = quiz.submissions
+    submissions = {s.id for s in quiz.submissions.iter_submissions()}
     student_ids = set(roster.data.keys())
 
     missing = student_ids - submissions

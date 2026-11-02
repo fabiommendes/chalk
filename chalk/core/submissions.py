@@ -16,6 +16,7 @@ from pydantic_core import InitErrorDetails
 from ..core.answer import serialize_any_answer
 from ..data.protocols import get_id
 from ..question import persist_answer, serialize_answer
+from ..util import unpack
 from . import AnyAnswer, models
 from .models import QuestionId, StudentId
 
@@ -39,7 +40,7 @@ class Submissions:
     #
     @property
     def quiz(self) -> Quiz:
-        return opt.unpack(self._quiz(), throw=RuntimeError("Quiz reference is dead"))
+        return unpack(self._quiz(), throw=RuntimeError("Quiz reference is dead"))
 
     #
     # Constructors
@@ -188,7 +189,7 @@ class Submissions:
         # mode == "persist"
         else:
             if not isinstance(question, Question):
-                question = opt.unpack(
+                question = unpack(
                     self.quiz.get_question(question_id),
                     throw=ValueError(f"Question {question_id} not found in quiz {self.quiz.id}"),
                 )
@@ -621,7 +622,7 @@ class Submissions:
         Convert a question id to a Question object.
         """
         if isinstance(question, QuestionId):
-            question = opt.unpack(
+            question = unpack(
                 self.quiz.get_question(question),
                 throw=ValueError(f"Question {question} not found in quiz {self.quiz.id}"),
             )

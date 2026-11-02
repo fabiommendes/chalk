@@ -29,6 +29,7 @@ from ..core.grader import Graded, Grader
 from ..core.issue import Issue, IssueLevel, IssueLevelLike, list_of_issues
 from ..core.models import AnyAnswer, Autograder, QuestionId, QuestionType, StudentId
 from ..data import json, yaml
+from ..util import unpack
 from .renderable import RenderableQuestion
 
 if TYPE_CHECKING:
@@ -50,7 +51,6 @@ __all__ = [
     "fail",
     "empty_result",
     "is_empty_issue",
-    "inference_issue",
 ]
 
 
@@ -103,7 +103,7 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
 
     @property
     def quiz(self) -> Quiz:
-        return opt.unpack(
+        return unpack(
             self._quiz(),
             throw=RuntimeError("Question is not associated with a quiz."),
         )
@@ -242,9 +242,9 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
         """
         Get the autograder configuration for this question, or a default configuration if none is set.
         """
-        if self.autograder is not None:
-            return self.autograder
-        elif self._quiz is not None:
+        if self._conf.autograder is not None:
+            return self._conf.autograder
+        if self._quiz() is not None:
             return self.quiz.get_autograder()
         return Autograder()
 
@@ -436,7 +436,6 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
         for issue in self._iter_issues():
             if ref_level.accepts(issue.severity) and has_scope(issue):
                 yield issue
-            yield issue
 
         if scope in (None, "grading"):
             for issue in self._get_grading_issues():
@@ -504,37 +503,14 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
 
                 conf = models.Textual.model_validate(dump)
                 return Textual(self.id, conf, quiz=self.quiz)
-            case "multiple-choice":
-                from .multiple_choice import MultipleChoice
-
-                conf = models.MultipleChoice.model_validate(dump)
-                return MultipleChoice(self.id, conf, quiz=self.quiz)
-            case "multiple-selection":
-                from .multiple_selection import MultipleSelection
-
-                conf = models.MultipleSelection.model_validate(dump)
-                return MultipleSelection(self.id, conf, quiz=self.quiz)
-            case "association":
-                from .association import Association
-
-                conf = models.Association.model_validate(dump)
-                return Association(self.id, conf, quiz=self.quiz)
-            case "fill-in":
-                from .fillin import FillIn
-
-                conf = models.FillIn.model_validate(dump)
-                return FillIn(self.id, conf, quiz=self.quiz)
-
             case "repo":
                 from .repo import Repo
 
                 conf = models.Repo.model_validate(dump)
                 return Repo(self.id, conf, quiz=self.quiz)
-
             case None:
                 conf = models.GenericQuestion.model_validate(dump)
                 return Generic(self.id, conf, quiz=self.quiz)
-
             case _:
                 assert_never(new_type)
 
@@ -658,17 +634,6 @@ def is_empty_issue(issues: list[Issue]) -> bool:
     Check if the given list of issues contains any empty answer issues.
     """
     return any(issue.code == "empty" and "response" in issue.scopes for issue in issues)
-
-
-def inference_issue(msg: str) -> Issue:
-    """
-    Used to flag a problem when trying to infer question parameters from submissions.
-    """
-    return Issue(
-        code="inference-error",
-        message=msg,
-        scopes=frozenset(["grading", "validation"]),
-    )
 
 
 def script_priority(path: Path) -> tuple[int, str]:

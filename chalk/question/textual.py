@@ -46,10 +46,6 @@ class Textual(BaseQuestion[models.Textual, TextualAnswer]):
     def accepts_blank(self) -> bool:
         return self._conf.blank
 
-    @property
-    def plagiarism(self) -> models.Plagiarism | None:
-        return self._conf.plagiarism
-
     def get_answer_extension(self, default: str | None = None) -> str:
         suffix = suffix_from_format(self.format)
         return super().get_answer_extension(default=default or suffix)

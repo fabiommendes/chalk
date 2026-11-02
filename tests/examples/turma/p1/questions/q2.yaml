@@ -1,0 +1,7 @@
+id: q2
+type: multiple-selection
+stem: Quais são números primos?
+choices:
+  - {id: dois, text: "2", correct: true}
+  - {id: tres, text: "3", correct: true}
+  - {id: quatro, text: "4", correct: false}

@@ -27,6 +27,7 @@ from rich.prompt import Prompt
 from ..data import load_spreadsheet, load_structured_data
 from ..numeric import to_decimal
 from ..question import Question
+from ..util import unpack
 from . import models
 from .decimal import set_decimal_precision
 from .error import ChalkError, ChalkException, ResourceNotFoundError, RosterNotFoundError
@@ -75,7 +76,7 @@ class Classroom:
 
     @property
     def lang(self) -> str:
-        return self._conf.lang or locale.getdefaultlocale()[0] or "C"
+        return self._conf.lang or locale.getlocale()[0] or "C"
 
     @property
     def root(self) -> Path:
@@ -378,7 +379,7 @@ class Classroom:
     #
     def prompt_quiz(self, quiz_id: str | None) -> Quiz:
         if quiz_id is not None:
-            return opt.unpack(
+            return unpack(
                 self.get_quiz(quiz_id),
                 throw=ChalkError.RESOURCE_NOT_FOUND(f"No quiz {quiz_id!r} found"),
             )

@@ -10,25 +10,20 @@ if TYPE_CHECKING:
 
 from ..core.answer import AnyAnswer
 from ..core.answer import serialize_any_answer as _serialize_answer
-from .association import Association
 from .base import Generic
-from .fillin import FillIn
-from .multiple_choice import MultipleChoice
-from .multiple_selection import MultipleSelection
+from .mdq import MdqQuestion
 from .repo import Repo
 from .textual import Textual
 
 __all__ = (
     "Question",
-    "Association",
     "Generic",
-    "FillIn",
-    "MultipleChoice",
-    "MultipleSelection",
+    "MdqQuestion",
+    "Repo",
     "Textual",
 )
 
-Question = Generic | Textual | MultipleChoice | MultipleSelection | Association | FillIn | Repo
+Question = Generic | Textual | MdqQuestion | Repo
 
 
 def load_question(id: models.QuestionId, conf: models.Question, /, quiz: Quiz) -> Question:
@@ -37,17 +32,7 @@ def load_question(id: models.QuestionId, conf: models.Question, /, quiz: Quiz) -
     """
     match conf.type:
         case None:
-            return Generic(id, cast(models.GenericQuestion, conf), quiz=quiz)
-        case "textual":
-            return Textual(id, conf, quiz=quiz)
-        case "multiple-choice":
-            return MultipleChoice(id, conf, quiz=quiz)
-        case "multiple-selection":
-            return MultipleSelection(id, conf, quiz=quiz)
-        case "association":
-            return Association(id, conf, quiz=quiz)
-        case "fill-in":
-            return FillIn(id, conf, quiz=quiz)
+            return Generic(id, cast("models.GenericQuestion", conf), quiz=quiz)
         case "text":
             return Textual(id, conf, quiz=quiz)
         case "repo":

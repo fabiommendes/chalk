@@ -26,10 +26,12 @@ def safe[R, **P](func: Callable[P, R]) -> Callable[P, R]:
             return func(*args, **kwargs)
         except ChalkErrorEnum as e:
             e.print()
+            raise SystemExit(1)
         except Exception as e:
             rich.print(f"[b red]Error:[/] {e}", file=sys.stderr)
             if is_debug_mode():
                 traceback.print_exc()
+            raise SystemExit(1)
 
     return cast(Callable[P, R], wrapper)
 

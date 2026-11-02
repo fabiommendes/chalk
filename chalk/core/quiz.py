@@ -11,10 +11,12 @@ from typing import (
     Any,
     Iterable,
     MutableSequence,
+    cast,
 )
 
 import opt
 import pandas as pd
+from natsort import natsorted
 from rich.console import RenderableType
 
 from ..core.answer import AnyAnswer
@@ -22,9 +24,11 @@ from ..core.models import QuestionId, QuizId, StudentId
 from ..core.submissions import Submissions
 from ..data import dump_structured_data
 from ..question import (
+    MdqQuestion,
     Question,
     load_question,
 )
+from ..question.mdq import load_mdq_document, mdq_question_id
 from ..table import Table
 from ..util.show import pretty_repr
 from . import models
@@ -102,6 +106,7 @@ class Quiz:
         self._conf = conf
         self._classroom = classroom
         self._question_cache: dict[QuestionId, Question] = {}
+        self._question_files: dict[QuestionId, Path] | None = None
 
     def __repr__(self) -> str:
         return pretty_repr(
@@ -116,41 +121,91 @@ class Quiz:
     #
     def get_question(self, question_id: QuestionId, /) -> Question | None:
         """
-        Get the question with the given id.
+        Get the question with the given id, or None if the quiz has no such
+        question.
 
-        If the question is not found in the quiz's questions, it will be
-        created with the given id and returned.
+        Questions come from mdq files in <quiz>/questions/ and from the
+        `questions` list in conf.yaml. A question with an mdq file may also
+        have an entry in conf.yaml with chalk specific settings (value,
+        autograder...), but not a type.
+
+        Raises:
+            ValueError: the question's mdq file is invalid, or its entry in
+                conf.yaml declares a type.
         """
         if question_id in self._question_cache:
             return self._question_cache[question_id]
 
-        if self._conf.questions is None:
-            self._conf.questions = _find_questions_in_submissions(self)
+        conf = self._question_confs().get(question_id)
+        path = self.get_question_files().get(question_id)
 
-        for conf in self._conf.questions:
-            if conf.id == question_id:
-                question = load_question(question_id, conf, quiz=self)
-                self._question_cache[question_id] = question
-                return question
-        return None
+        question: Question
+        if path is not None:
+            if conf is not None and conf.type is not None:
+                msg = (
+                    f"{self.id}/{question_id} is defined in {path.name}, so its entry in "
+                    f"conf.yaml cannot declare a type ({conf.type!r})"
+                )
+                raise ValueError(msg)
+            document = load_mdq_document(path, question_id)
+            generic = cast(models.GenericQuestion, conf or models.GenericQuestion(id=question_id))
+            question = MdqQuestion(question_id, generic, document, path=path, quiz=self)
+        elif conf is not None:
+            question = load_question(question_id, conf, quiz=self)
+        else:
+            return None
+
+        self._question_cache[question_id] = question
+        return question
 
     def get_questions(self) -> dict[QuestionId, Question]:
         """
         Get the questions for this quiz as a dictionary mapping question ids to Question objects.
-
-        If the questions are not already loaded, they will be inferred from the submissions.
         """
         return {id: q for id in self.get_question_ids() if (q := self.get_question(id)) is not None}
 
     def get_question_ids(self) -> list[QuestionId]:
         """
-        Get the question ids for this quiz as a list.
+        Get the question ids for this quiz, in order.
 
-        If the questions are not already loaded, they will be inferred from the submissions.
+        The order is the one of the `questions` list in conf.yaml, followed by
+        the mdq files that have no entry there, in natural order. When the quiz
+        declares no questions at all, they are inferred from the submissions.
         """
-        if self._conf.questions is None:
+        files = self.get_question_files()
+        if self._conf.questions is None and not files:
             self._conf.questions = _find_questions_in_submissions(self)
-        return [q.id for q in self._conf.questions]
+
+        ids = [q.id for q in self._conf.questions or ()]
+        ids.extend(id for id in files if id not in ids)
+        return ids
+
+    def get_question_files(self) -> dict[QuestionId, Path]:
+        """
+        Map the id of each question defined in <quiz>/questions/ to its file.
+
+        Raises:
+            ValueError: two files define the same question.
+        """
+        if self._question_files is not None:
+            return self._question_files
+
+        base = self.root / "questions"
+        found: dict[QuestionId, Path] = {}
+        if base.is_dir():
+            for path in natsorted(base.iterdir(), key=lambda p: p.name):
+                if not path.is_file() or (id := mdq_question_id(path)) is None:
+                    continue
+                if id in found:
+                    msg = f"question {self.id}/{id} is defined twice: {found[id].name}, {path.name}"
+                    raise ValueError(msg)
+                found[id] = path
+
+        self._question_files = found
+        return found
+
+    def _question_confs(self) -> dict[QuestionId, models.Question]:
+        return {q.id: q for q in self._conf.questions or ()}
 
     def get_answer(
         self, question: Question | QuestionId, student: Student | StudentId

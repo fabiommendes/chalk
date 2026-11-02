@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Literal, assert_never
+from typing import TYPE_CHECKING, Any, Literal
 
 from frozendict import frozendict
 
@@ -17,24 +17,22 @@ from ..data.validators import typecheck
 from ..types import JSON
 
 if TYPE_CHECKING:
-    from .models import QuestionType
+    pass
 
-FillInAnswer = tuple[str | None, ...]
-AssociationAnswer = frozendict[str, str | None]
+MappingAnswer = frozendict[str, Any]
+ListAnswer = tuple[Any, ...]
 NumericAnswer = int | float | Decimal
 TextualAnswer = str
 MultipleChoiceAnswer = str
-MultipleSelectionAnswer = tuple[str, ...]
 RepoAnswer = str  # Usually a path in the form responses/<student_id>/
 
 
 AnyAnswer = (
     NumericAnswer
-    | AssociationAnswer
-    | FillInAnswer
+    | MappingAnswer
+    | ListAnswer
     | TextualAnswer
     | MultipleChoiceAnswer
-    | MultipleSelectionAnswer
     | RepoAnswer
 )
 
@@ -88,30 +86,27 @@ _is_str = typecheck(str)
 
 
 def parse_any_answer(
-    answer: str, /, mode: QuestionType | None = None, error: Literal["raise", "ignore"] = "raise"
+    answer: str, /, mode: str | None = None, error: Literal["raise", "ignore"] = "raise"
 ) -> AnyAnswer:
     """
     Parse the given string representation of an answer into an AnyAnswer.
+
+    `mode` is a question type: chalk's own ("text", "repo") or an mdq type
+    ("numeric", "multiple-selection"...). Unknown types read as plain text.
     """
 
     try:
         match mode:
             case "numeric":
                 return _parse_numeric(answer)
-            case "fill-in":
+            case "multiple-selection" | "ordering":
                 return _parse_list(answer)
-            case "association":
+            case "true-false" | "fill-in":
                 return _parse_dict(answer)
-            case "multiple-choice":
-                return answer
-            case "multiple-selection":
-                return _parse_list(answer)
-            case "repo" | "text" | "multiple-choice":
-                return answer
             case None:
                 return _parse_any(answer)
-            case other:
-                assert_never(other)
+            case _:
+                return answer
 
     except ValueError as e:
         if error == "raise":
@@ -134,17 +129,17 @@ def _parse_numeric(answer: str, /) -> NumericAnswer:
         raise ValueError(f"Invalid numeric answer: {answer}")
 
 
-def _parse_list(answer: str, /) -> FillInAnswer | MultipleSelectionAnswer:
+def _parse_list(answer: str, /) -> ListAnswer:
     try:
         data = yaml.loads(answer)
     except Exception:
         raise ValueError(f"Invalid list answer: {answer}")
-    if isinstance(data, list) and all(isinstance(a, str) or a is None for a in data):
-        return tuple(data)
+    if isinstance(data, list):
+        return tuple(tuple(a) if isinstance(a, list) else a for a in data)
     raise ValueError(f"Invalid list answer: {answer}")
 
 
-def _parse_dict(answer: str, /) -> AssociationAnswer:
+def _parse_dict(answer: str, /) -> MappingAnswer:
     try:
         data = yaml.loads(answer)
     except Exception:

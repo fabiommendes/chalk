@@ -85,7 +85,7 @@ def list_questions(
         output_path,
         sort=sort,
         styles={"id": "bold yellow"},
-        last_row={"grade": total, "id": "total"},
+        extra_rows=[{"grade": total, "id": "total"}],
         format=opt.map(validate_table_format, output_format),
     )
 
