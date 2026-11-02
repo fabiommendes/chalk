@@ -33,9 +33,7 @@ def seq[T](parser_a: Parser[T], src: str, /) -> Parsed[tuple[T]]: ...
 
 
 @overload
-def seq[T1, T2](
-    p1: Parser[T1], p2: Parser[T2], src: str, /
-) -> Parsed[tuple[T1, T2]]: ...
+def seq[T1, T2](p1: Parser[T1], p2: Parser[T2], src: str, /) -> Parsed[tuple[T1, T2]]: ...
 
 
 @overload

@@ -23,9 +23,7 @@ class SupportsDunderGT(Protocol[_T_contra]):
     def __gt__(self, other: _T_contra, /) -> bool: ...
 
 
-type SupportsRichComparison[_T_contra] = (
-    SupportsDunderLT[_T_contra] | SupportsDunderGT[_T_contra]
-)
+type SupportsRichComparison[_T_contra] = SupportsDunderLT[_T_contra] | SupportsDunderGT[_T_contra]
 
 
 class ReadOnly[T](Protocol):

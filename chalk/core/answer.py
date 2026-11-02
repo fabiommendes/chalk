@@ -28,12 +28,7 @@ RepoAnswer = str  # Usually a path in the form responses/<student_id>/
 
 
 AnyAnswer = (
-    NumericAnswer
-    | MappingAnswer
-    | ListAnswer
-    | TextualAnswer
-    | MultipleChoiceAnswer
-    | RepoAnswer
+    NumericAnswer | MappingAnswer | ListAnswer | TextualAnswer | MultipleChoiceAnswer | RepoAnswer
 )
 
 

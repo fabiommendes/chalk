@@ -34,9 +34,7 @@ def flatten[T](data: Iterable[Iterable[T]], /) -> list[T]:
     return [item for sublist in data for item in sublist]
 
 
-def find_path(
-    pred: Callable[[Any], bool], data: Any, /, path: str = ""
-) -> tuple[str, Any] | None:
+def find_path(pred: Callable[[Any], bool], data: Any, /, path: str = "") -> tuple[str, Any] | None:
     """
     Return the path of the first item that obey the given predicate in a nested
     data structure (usually formed by dicts and lists).
