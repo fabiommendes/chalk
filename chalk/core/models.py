@@ -345,11 +345,25 @@ class Autograder(BaseModel):
         Literal["none", "bwrap", "podman"] | None,
         Field(
             description=(
-                "Isolation of the autograder run. 'none' is for scripts that only read the "
-                "answer. Only 'none' is implemented for now."
+                "Isolation of the autograder run. Scripts run in 'bwrap' by default; "
+                "'none' is for scripts that only read the answer. 'podman' is not "
+                "implemented yet."
             ),
         ),
     ] = None
+    network: Annotated[
+        Literal["none", "host"],
+        Field(description="Network inside the sandbox: 'none' or the host network."),
+    ] = "none"
+    mounts: Annotated[
+        list[Path],
+        Field(
+            description=(
+                "Paths the sandbox mounts read only, for files under hidden directories "
+                "such as the home directory. Relative paths start at the question directory."
+            ),
+        ),
+    ] = []
     limits: Limits = Field(default_factory=Limits)
     match: Annotated[
         list[str],

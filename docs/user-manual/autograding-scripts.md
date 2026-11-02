@@ -182,11 +182,36 @@ and a few others. Add more with `autograder.pass_env`:
 
 ## Sandbox
 
-Chalk does not isolate the script yet. `autograder.sandbox: none` declares
-that the script only reads the answer (a regex, a string, code parsed
-without running it). The `bwrap` and `podman` values are reserved for the
-sandbox and fail for now. Until they exist, a script that runs the
-student's code must isolate it on its own.
+Scripts run inside a [bubblewrap](https://github.com/containers/bubblewrap)
+sandbox by default, so the student's code started by the script cannot read
+your files, use the network or change the system:
+
+- The whole file system is visible but read only. System packages and
+  compilers work without configuration.
+- `/home`, `/root`, `/run`, `/tmp`, `/var/tmp`, `/mnt`, `/media` and your
+  home directory are replaced by empty directories. The directories in
+  `PATH` and the Python that runs chalk are mounted back read only.
+- The working directory and the result file are the only writable places.
+- The network is off.
+
+Options:
+
+```yaml
+    autograder:
+      sandbox: bwrap         # default; "none" runs the script directly
+      network: host          # default "none"
+      mounts: [data, ~/.rustup]   # extra read only paths, relative to the question
+```
+
+Use `sandbox: none` only for scripts that read the answer without running
+it (a regex, a string, code parsed without executing). A sandbox breaks a
+script that needs files under hidden directories; list them in `mounts`.
+
+Chalk fails with a message if `bwrap` is missing or the kernel does not
+allow unprivileged user namespaces.
+
+The sandbox protects your machine, not the grade: code that runs in the
+same sandbox as the script can still write the result file.
 
 
 ## Regex answers

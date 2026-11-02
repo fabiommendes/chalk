@@ -10,7 +10,8 @@ from ..core import Question, StudentId, models
 from ..core import disqualification as dq
 from ..core.grader import DEFAULT_TIMEOUT, Graded, Grader
 from .repo import Repo
-from .script_runner import ChalkEnv, ScriptRunner
+from .sandbox import check_bwrap
+from .script_runner import ChalkEnv, Sandbox, ScriptRunner
 
 NOT_GIVEN: Any = object()
 
@@ -46,9 +47,7 @@ class ScriptGrader(Grader[str | Path]):
 
         if timeout is None:
             timeout = self.conf.timeout or DEFAULT_TIMEOUT
-        if self.conf.sandbox not in (None, "none"):
-            msg = f"sandbox {self.conf.sandbox!r} is not implemented yet; use 'none'"
-            raise NotImplementedError(msg)
+        sandbox = self._sandbox()
 
         limit = self.conf.limits.answer_size
         if isinstance(answer, Path):
@@ -82,6 +81,7 @@ class ScriptGrader(Grader[str | Path]):
                 on_output_line=on_output_line,
                 capture_output=capture_output,
                 limits=self.conf.limits,
+                sandbox=sandbox,
             )
             result = runner.run()
 
@@ -148,6 +148,20 @@ class ScriptGrader(Grader[str | Path]):
             if clear:
                 repo.clear_all()
                 log.debug(f"Cleared repository for {student_id}")
+
+    def _sandbox(self) -> Sandbox | None:
+        """
+        Sandbox options for this question, or None to run without sandbox.
+        """
+        kind = self.conf.sandbox or "bwrap"
+        if kind == "none":
+            return None
+        if kind != "bwrap":
+            raise NotImplementedError(f"sandbox {kind!r} is not implemented yet")
+        check_bwrap()
+        root = getattr(self.question, "root", None) or Path()
+        mounts = tuple(root / p.expanduser() for p in self.conf.mounts)
+        return Sandbox(network=self.conf.network == "host", readable=mounts)
 
     def chalk_info(self, **kwargs: str) -> str:
         """

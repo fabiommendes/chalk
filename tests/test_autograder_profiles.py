@@ -72,6 +72,7 @@ def script_grader(tmp_path: Path, body: str, **conf) -> ScriptGrader:
     question = SimpleNamespace(
         id="q1", quiz=SimpleNamespace(id="p1"), get_template_path=lambda: None
     )
+    conf.setdefault("sandbox", "none")
     return ScriptGrader(script, question, models.Autograder(**conf))  # type: ignore[arg-type]
 
 
@@ -103,7 +104,7 @@ class TestScriptLimits:
         grader = script_grader(tmp_path, body, limits={"memory": "200MB"})
         assert grader("s1", "x").score == 0
 
-    def test_sandbox_not_implemented(self, tmp_path) -> None:
-        grader = script_grader(tmp_path, 'echo 1 > "$CHALK_RESULT"\n', sandbox="bwrap")
-        with pytest.raises(NotImplementedError, match="bwrap"):
+    def test_podman_not_implemented(self, tmp_path) -> None:
+        grader = script_grader(tmp_path, 'echo 1 > "$CHALK_RESULT"\n', sandbox="podman")
+        with pytest.raises(NotImplementedError, match="podman"):
             grader("s1", "x")

@@ -382,8 +382,13 @@ questions:
    `file_size`, `answer_size`), chaves `profile` e `sandbox` (só `none`) e
    perfil `regex` também feitos. Limite de processos fica para o sandbox:
    `RLIMIT_NPROC` conta todos os processos do usuário, não só os do aluno.
-3. Backend `bwrap` com o perfil `script`: o script atual passa a rodar
-   isolado, com relatório fora da área do aluno.
+3. ~~Backend `bwrap` com o perfil `script`.~~ Feito. O script inteiro roda
+   no sandbox (padrão quando `sandbox` não é declarado), com lista de
+   bloqueio, `network: none|host` e `mounts`. O resultado fica fora da área
+   de trabalho, mas montado com escrita no sandbox: protege a máquina, não
+   a nota. Proteger a nota fica para os perfis da fase 4, ou para um
+   `$CHALK_RUN` em que só a parte do aluno roda isolada. Limite de
+   processos (cgroups) ainda falta.
 4. Perfil `python-pytest` com preparo em cache, nota pela lista coletada e
    `chalk autograde --check`. Leitor JUnit.
 5. Etapa `build` e perfil `rust-cargo`, com cache de `target/` em overlay e

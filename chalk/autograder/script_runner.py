@@ -24,6 +24,7 @@ from ..core.grader import Graded
 from ..core.score import Score
 from .repo import Repo
 from .result_extractor import extract_result_from_file
+from .sandbox import bwrap_command
 
 __all__ = [
     "ChalkEnv",
@@ -81,6 +82,7 @@ class ScriptRunner:
         on_output_line: Callable[[str], Any] | None = None,
         capture_output: bool = True,
         limits: models.Limits | None = None,
+        sandbox: Sandbox | None = None,
     ) -> None:
         self._chalk_env = env
         self.timeout = timeout
@@ -104,11 +106,23 @@ class ScriptRunner:
         self._result_dir = Path(tempfile.mkdtemp(prefix="chalk-result-"))
         self.result_path = self._result_dir / "result"
 
+        env = self._chalk_env.to_env_dict(repo.root, self.result_path)
+        command: str | list[str] = self._get_shell_command(script_path)
+        if sandbox is not None:
+            command = bwrap_command(
+                command,
+                workdir=repo.root,
+                writable=[self._result_dir],
+                readable=[script_path, *sandbox.readable],
+                network=sandbox.network,
+                env=env,
+            )
+
         self.process = subprocess.Popen(
-            self._get_shell_command(script_path),
-            shell=True,
+            command,
+            shell=sandbox is None,
             cwd=repo.root,
-            env=self._chalk_env.to_env_dict(repo.root, self.result_path),
+            env=env,
             stdout=self._slave_pty_fd if capture_output else None,
             stderr=self._slave_pty_fd if capture_output else None,
             stdin=subprocess.DEVNULL,
@@ -262,6 +276,16 @@ class ScriptRunner:
         if not self.result_path.is_file():
             return None
         return extract_result_from_file(self.result_path)
+
+
+@dataclass(frozen=True)
+class Sandbox:
+    """
+    Options of the bwrap sandbox around the script.
+    """
+
+    network: bool = False
+    readable: tuple[Path, ...] = ()
 
 
 @dataclass
