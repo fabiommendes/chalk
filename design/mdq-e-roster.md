@@ -94,3 +94,25 @@ projeto):
 - `status` entra, em minúsculas (`active`, `dropped`).
 - Célula vazia quando o valor falta. O servidor guarda `schoolId` e
   `githubId` nulos como `!<username>`, e isso não pode ir para o arquivo.
+
+
+## Integração com o codehood
+
+Implementado:
+
+- `roster.csv` no esquema acima, lido e escrito pelo chalk sem perder o que
+  é do codehood.
+- `chalk codehood grades`: uma coluna por quiz no `grades.csv` da raiz, em
+  porcentagem (a mesma escala de `ExamResult.score`), com a chave do roster.
+  Preserva as outras colunas, as linhas e o delimitador. O `grades.py` do
+  curso lê as colunas em `student.scores`.
+
+Propostas, ainda sem decisão:
+
+- Quiz do chalk que reaproveita questões do banco `questions/` do codehood
+  (por exemplo, `source: ../questions/x.md` na entrada do `conf.yaml`). Hoje
+  é preciso copiar o arquivo.
+- Ler do codehood a lista de matriculados quando existir `codehood roster`;
+  até lá, o roster é mantido à mão ou com `chalk roster import`.
+- Nota de questão aberta corrigida no chalk enviada como `Feedback` do
+  codehood. Depende de API e de `codehood pull`, que não existem.
