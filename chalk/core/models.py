@@ -66,6 +66,10 @@ class Classroom(BaseModel):
     autograder: Autograder | None = None
     decimal_places: Annotated[int, Field(ge=0)] = 2
 
+    #: Column of roster.csv with the student id. By default "school_id",
+    #: or "id" in rosters without a "school_id" column.
+    student_id: str | None = None
+
 
 class Student(BaseModel):
     """

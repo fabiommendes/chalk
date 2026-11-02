@@ -73,6 +73,17 @@ class Student:
         else:
             self.extra["github"] = value
 
+    @property
+    def status(self) -> str:
+        """
+        Enrollment status: "active" (the default) or "dropped".
+        """
+        return self.extra.get("status") or "active"
+
+    @property
+    def active(self) -> bool:
+        return self.status != "dropped"
+
     @classmethod
     def from_model(cls, id: StudentId, model: models.Student, /, classroom: Classroom) -> Student:
         """

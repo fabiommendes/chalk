@@ -7,6 +7,7 @@ import typer
 
 from .. import assets, env
 from ..core.classroom import is_project_root
+from ..core.roster import SHARED_COLUMNS
 from .util import safe
 
 __all__ = ["init", "add_init_command"]
@@ -53,7 +54,7 @@ def init(
     base = Path.cwd()
     (base / "chalk.toml").write_text(chalk_toml)
     if not (roster := base / "roster.csv").exists():
-        roster.write_text("id,name")
+        roster.write_text(",".join(SHARED_COLUMNS) + "\n")
 
     for dir in ["reports", "data", "scripts"]:
         if not (path := base / dir).exists():

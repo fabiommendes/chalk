@@ -27,15 +27,36 @@ if TYPE_CHECKING:
 
 __all__ = ["Roster", "read_roster_like"]
 
-COLUMN_ORDER = ["id", "name", "age", "email", "email_alt", "github"]
+#: Columns of the roster file shared with codehood, in order. See
+#: design/mdq-e-roster.md.
+SHARED_COLUMNS = ["school_id", "username", "name", "email", "github", "status"]
+COLUMN_ORDER = ["id", *SHARED_COLUMNS, "age", "email_alt"]
+DEFAULT_ID_COLUMN = "school_id"
 type ConflictMode = Literal["merge", "replace", "keep", "error"]
 type MergeConflict = str
 
 
 @dataclass(frozen=True)
 class Roster(Mapping[StudentId, Student]):
+    """
+    The students of a classroom, read from roster.csv.
+
+    The file may be shared with other tools (codehood), so the roster keeps
+    what it does not use: the order of the columns and the rows that have no
+    student id. Both are written back by `save`.
+    """
+
     path: Path
     data: dict[StudentId, Student]
+
+    #: Column of the roster file that holds the student id.
+    id_column: str = DEFAULT_ID_COLUMN
+
+    #: Columns of the file, in the order they were read.
+    columns: tuple[str, ...] = ()
+
+    #: Rows with no student id, kept as they were read.
+    orphans: tuple[dict[str, Any], ...] = ()
 
     @classmethod
     def from_json(
@@ -44,25 +65,47 @@ class Roster(Mapping[StudentId, Student]):
         /,
         path: Path,
         classroom: Classroom,
+        id_column: str | None = None,
     ) -> Roster:
         """
         Load roster from a JSON-like iterable of dictionaries and return a Roster object.
+
+        Args:
+            id_column:
+                Column with the student id. By default, use "school_id" if
+                present, otherwise "id".
         """
+        items = [dict(item) for item in items]
+        columns: list[str] = []
+        for item in items:
+            columns.extend(k for k in item if k not in columns)
+
+        if id_column is None:
+            id_column = DEFAULT_ID_COLUMN if DEFAULT_ID_COLUMN in columns or not columns else "id"
+        if items and id_column not in columns:
+            raise ValueError(f"Roster file has no {id_column!r} column: {path}")
+
         data: dict[StudentId, Student] = {}
-        for i, item in enumerate(items):
-            item = dict(item)
-            try:
-                id = item.pop("id")
-                if id is None:
-                    continue
-                name = item.pop("name")
-            except (KeyError, TypeError) as e:
-                raise ValueError(f"Missing 'id' field in item {i}: {item}") from e
+        orphans: list[dict[str, Any]] = []
+        for item in items:
+            id = (item.get(id_column) or "").strip()
+            if not id:
+                orphans.append(item)
+                continue
+            if id in data:
+                raise ValueError(f"Duplicate student id in {path}: {id!r}")
 
-            student = Student(id, name or id, classroom=classroom, **clean_data(item))
-            data[id] = student
+            fields = {k: v for k, v in item.items() if k not in (id_column, "name")}
+            name = (item.get("name") or "").strip() or id
+            data[id] = Student(id, name, classroom=classroom, **clean_data(fields))
 
-        return cls(data=data, path=path)
+        return cls(
+            data=data,
+            path=path,
+            id_column=id_column,
+            columns=tuple(columns),
+            orphans=tuple(orphans),
+        )
 
     def to_json(self) -> list[dict[str, Any]]:
         """
@@ -144,7 +187,7 @@ class Roster(Mapping[StudentId, Student]):
             data.append(row)
 
         col_set.discard("id")
-        columns = sorted(sorted(col_set), key=COLUMN_ORDER.index)
+        columns = sorted(sorted(col_set), key=_column_order)
         ids = [item.pop("id") for item in data]
         rows = [[item.get(col) for col in columns] for item in data]
         return Table(rows, index=ids, columns=columns)
@@ -234,17 +277,22 @@ class Roster(Mapping[StudentId, Student]):
         """
         Save the roster to the roster file.
         """
-        table = self.table()
-        columns = {"id", *table.columns}
-        path = self.path
+        rows = [
+            {self.id_column: student.id, "name": student.name, **student.extra}
+            for student in self.data.values()
+        ]
+        rows.extend(self.orphans)
 
+        columns = list(self.columns) or [self.id_column, *SHARED_COLUMNS[1:3]]
+        for row in rows:
+            columns.extend(k for k in row if k not in columns)
+
+        path = self.path
         match path.suffix:
             case ".csv":
-                data = table.to_dicts()
-                _save_csv(path, data, columns)
+                _save_csv(path, rows, columns)
             case ".json":
-                data = table.to_dicts(clear_nones=True)
-                path.write_text(json.dumps(data, indent=2))
+                path.write_text(json.dumps(clean_data(rows), indent=2, ensure_ascii=False))
             case _:
                 msg = f"Saving {path.suffix} roster is not supported"
                 raise ValueError(msg)
@@ -293,11 +341,17 @@ def read_roster_like(path: Path, classroom: Classroom) -> Roster:
     return Roster(data=roster, path=path)
 
 
-def _save_csv(path: Path, data: list[dict[str, Any]], columns: set[str]) -> None:
+def _save_csv(path: Path, data: list[dict[str, Any]], columns: list[str]) -> None:
     import csv
 
-    sorted_columns = sorted(columns, key=COLUMN_ORDER.index)
     with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=sorted_columns)
+        writer = csv.DictWriter(f, fieldnames=columns, lineterminator="\n")
         writer.writeheader()
-        writer.writerows(clean_data(data))
+        writer.writerows(data)
+
+
+def _column_order(column: str) -> int:
+    try:
+        return COLUMN_ORDER.index(column)
+    except ValueError:
+        return len(COLUMN_ORDER)

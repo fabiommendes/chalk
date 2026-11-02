@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import locale
 import tomllib
 from decimal import Decimal
@@ -24,7 +25,7 @@ import pandas as pd
 from natsort import natsorted
 from rich.prompt import Prompt
 
-from ..data import load_spreadsheet, load_structured_data
+from ..data import load_structured_data
 from ..numeric import to_decimal
 from ..question import Question
 from ..util import unpack
@@ -33,7 +34,7 @@ from .decimal import set_decimal_precision
 from .error import ChalkError, ChalkException, ResourceNotFoundError, RosterNotFoundError
 from .models import Autograder, QuestionId, QuizId, StudentId
 from .quiz import Quiz
-from .roster import Roster
+from .roster import DEFAULT_ID_COLUMN, Roster
 from .student import Student
 from .submissions import Submissions
 
@@ -233,9 +234,12 @@ class Classroom:
         if not path.exists():
             raise RosterNotFoundError()
 
-        table = load_spreadsheet(path)
-        raw = table.to_dicts()
-        return Roster.from_json(raw, path=path, classroom=self)
+        with path.open(newline="", encoding="utf-8") as fd:
+            raw = [
+                {k: v or None for k, v in row.items() if k is not None}
+                for row in csv.DictReader(fd)
+            ]
+        return Roster.from_json(raw, path=path, classroom=self, id_column=self._conf.student_id)
 
     #
     # Getters/setters
@@ -251,7 +255,11 @@ class Classroom:
             return self._roster
         except RosterNotFoundError:
             if on_empty == "create":
-                return Roster(path=self._root / "roster.csv", data={})
+                return Roster(
+                    path=self._root / "roster.csv",
+                    data={},
+                    id_column=self._conf.student_id or DEFAULT_ID_COLUMN,
+                )
             raise
 
     def get_student(self, student_id: StudentId, fuzzy: bool = False) -> Student | None:

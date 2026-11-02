@@ -1,4 +1,5 @@
-id,name,email,github
-0001,Alice Anderson,alice@example.com,alice
-0002,Bob Brown,bob@example.com,bob
-0003,Carol Clark,,
+school_id,username,name,email,github,status
+0001,alice,Alice Anderson,alice@example.com,alice,active
+0002,bob,Bob Brown,bob@example.com,bob,active
+0003,carol,Carol Clark,,,dropped
+,dave,Dave Davis,dave@example.com,,active
