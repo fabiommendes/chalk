@@ -13,11 +13,16 @@ This section is generated automatically from the Python source code.
 
 ::: chalk.core
 
-::: chalk.conf
-
 ::: chalk.env
 
 ::: chalk.info
+
+
+## Questions and codehood
+
+::: chalk.question.mdq
+
+::: chalk.codehood
 
 
 ## CLI modules
@@ -34,8 +39,6 @@ This section is generated automatically from the Python source code.
 ::: chalk.table
 
 ### chalk.util.*
-
-::: chalk.util.file
 
 ::: chalk.util.sequence
 

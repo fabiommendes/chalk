@@ -27,13 +27,13 @@ course/
 ```
 
 Any executable file named `autograde.*` is fine. You can also specify files on
-different locations using the option `questions > q1 > autograder > script` in
-the `chalk.yaml` configuration file:
+different locations using the option `autograder.script` of the question in
+the quiz's `conf.yaml`:
 
 ```yaml
-# chalk.yaml
+# final-exam/conf.yaml
 questions:
-  q1:
+  - id: q1
     autograder:
       script: the-grading-script.py
 ```
@@ -60,12 +60,12 @@ Before grading each submission, chalk copies the contents of the `template/` to
 the student's working directory. It also copies the answer of each student to a
 file named `answer.txt` in the student's working directory. The name of the file
 can be changed setting the option
-`questions > question_id > autograder > answer` to the appropriate value
+`autograder.answer` of the question in the quiz's `conf.yaml`:
 
 ```yaml
-# chalk.yaml
+# final-exam/conf.yaml
 questions:
-  q1:
+  - id: q1
     autograder:
       script: autograde.sh
       answer: src/submission.py
@@ -76,23 +76,23 @@ variables are described in the following table:
 
 | Variable             | Default      | Description                                              |
 | -------------------- | ------------ | -------------------------------------------------------- |
-| CHALK_STUDENT_ID     |              | ID of the student who submitted the answer.              |
+| CHALK_STUDENT        |              | ID of the student who submitted the answer.              |
 | -------------------- | ------------ | -------------------------------------------------------- |
-| CHALK_QUESTION_ID    |              | ID of the question being graded.                         |
+| CHALK_QUESTION       |              | ID of the question being graded.                         |
 | -------------------- | ------------ | -------------------------------------------------------- |
-| CHALK_ASSIGNMENT_ID  |              | ID of the quiz being graded.                             |
+| CHALK_ASSIGNMENT     |              | ID of the quiz being graded.                             |
 | -------------------- | ------------ | -------------------------------------------------------- |
 | CHALK_ROOT           |              | Absolute path to the working directory of the submission |
 | -------------------- | ------------ | -------------------------------------------------------- |
 | CHALK_RESULT         | `graded.*`   | Name of the file  where the grading script               |
 |                      |              | should write the results.                                |
 |                      |              |                                                          |
-|                      |              | Chalk can understand results in JSON, YAML, TOML or      |
-|                      |              | plain text format.                                       |
+|                      |              | Chalk can understand results in JSON, YAML or plain      |
+|                      |              | text.                                                    |
 | -------------------- | ------------ | -------------------------------------------------------- |
 | CHALK_ANSWER         | `answer.txt` | Name of the file where the student's answer is saved     |
 | -------------------- | ------------ | -------------------------------------------------------- |
-| CHALK_ANSWER_CONTENT |              | Name of the file where the student's answer is saved     |
+| CHALK_ANSWER_CONTENT |              | The student's answer itself, as text                     |
 | -------------------- | ------------ | -------------------------------------------------------- |
 
 

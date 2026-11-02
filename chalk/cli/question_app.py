@@ -122,6 +122,6 @@ def show(
     ] = False,
 ) -> None:
     """
-    Show details of a quiz.
+    Show details of a question.
     """
     Classroom.from_prompt(quiz_id=quiz_id, question_id=question_id).question.render()

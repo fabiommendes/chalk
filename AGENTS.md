@@ -1,0 +1,48 @@
+# chalk
+
+CLI para corrigir quizzes e manter roster e notas em arquivos de texto. Ver
+`README.md` para o layout de uma turma e os formatos.
+
+## Idioma
+
+Nível 2 (`~/git/tools/tooling-root/dev/adr/0002-idioma-dos-repositorios.md`):
+código, comentários, `README.md` e `docs/` em inglês; `AGENTS.md` e
+`design/` em português.
+
+## Verificação
+
+```sh
+uv run task check   # ruff, pytest e mkdocs --strict
+```
+
+Rode antes de cada commit. Testes ficam em `tests/` e usam a turma de exemplo
+`tests/examples/turma` (fixture `classroom` em `tests/conftest.py`, que copia
+a turma para um diretório temporário). `tests/test_cli_smoke.py` roda todo
+comando não interativo; comando novo entra na lista.
+
+## Dependências irmãs
+
+- `mdq` vem do checkout local `../../codehood/mdq/mdq-py` (`[tool.uv.sources]`
+  em `pyproject.toml`). A versão do PyPI está atrás. Não mudamos o mdq por
+  causa do chalk: o chalk segue as regras dele (por exemplo, `stem`
+  obrigatório).
+- `optionz` (`import opt`) e `errorz` vêm do PyPI. `opt.unpack` não existe
+  lá; use `chalk.util.unpack`.
+
+## Convivência com o codehood
+
+Uma turma pode ser ao mesmo tempo projeto chalk e curso codehood. Regras em
+`design/mdq-e-roster.md`:
+
+- O chalk não lê nem escreve arquivos do codehood, exceto `roster.csv`
+  (esquema compartilhado) e as colunas de quiz do `grades.csv`
+  (`chalk codehood grades`).
+- Ao salvar `roster.csv`, preserve colunas desconhecidas, a ordem das colunas
+  e as linhas sem id.
+
+## Armadilhas conhecidas
+
+- Importar `chalk.data` antes de `chalk.core` gera import circular. Importe
+  `chalk.core` primeiro.
+- `chalk.cli.util.safe` converte exceções em mensagem e sai com código 1.
+  Use `CHALK_DEBUG=1` para ver o traceback.

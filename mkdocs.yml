@@ -13,23 +13,14 @@ plugins:
       handlers:
         python:
           paths:
-            - src
+            - .
 
 nav:
   - Home: index.md
   - User Manual:
       - Overview: user-manual/index.md
-      - Command Tree: user-manual/command-tree.md
-      - Man Pages:
-          - chalk: user-manual/man/chalk.md
-          - chalk-init: user-manual/man/chalk-init.md
-          - chalk-roster: user-manual/man/chalk-roster.md
-          - chalk-quiz: user-manual/man/chalk-quiz.md
-          - chalk-question: user-manual/man/chalk-question.md
-          - chalk-response: user-manual/man/chalk-response.md
-          - chalk-grade: user-manual/man/chalk-grade.md
-          - chalk-report: user-manual/man/chalk-report.md
-          - chalk-script: user-manual/man/chalk-script.md
+      - Commands: user-manual/commands.md
+      - Autograding scripts: user-manual/autograding-scripts.md
   - Developer Docs:
       - Overview: developer/index.md
       - API Reference: developer/api.md

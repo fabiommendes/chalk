@@ -1,186 +1,127 @@
 Chalk classroom manager
 =======================
 
-Chalk is a CLI tool for classroom management. It helps teachers manage
-quizzes, students, and grades. Chalk is a CLI-based tool that assumes that
-information is better stored in local text files instead of a complex opaque
-database.
+Chalk is a command line tool to grade quizzes and keep track of students and
+grades. Everything lives in plain text files in a directory: a roster, one
+directory per quiz, the submissions and the grades. Chalk grades what was
+answered outside of it (a paper exam, a Moodle or Google Forms export, GitHub
+Classroom repositories), either automatically or by hand.
+
+Chalk can share a repository with a codehood course:
+both read the same `roster.csv`, and `chalk codehood grades` writes the quiz
+grades to the `grades.csv` that codehood publishes.
 
 
 Installation
 ------------
 
-The easier way to run Chalk is to use uvx or pipx:
-
 ```bash
 uvx chalk  # or pipx run chalk
 ```
 
-You can add it to your BASH or ZSH profile for easier access,
+Chalk needs Python 3.13 or newer.
+
+
+Getting started
+---------------
 
 ```bash
-echo 'alias chalk="uvx chalk"' >> ~/.bashrc  # or ~/.zshrc
-source ~/.bashrc  # or ~/.zshrc
+chalk init                          # creates chalk.toml and roster.csv
+chalk quiz create p1 --questions 3  # creates p1/conf.yaml
+# write the questions in p1/questions/ and the answers in p1/submissions.csv
+chalk autograde p1 q1               # grades q1 with its answer key
+chalk grade p1/q3                   # grades q3 by hand
+chalk show p1 --grades              # shows the grades table
 ```
 
-or install it globally using pip:
 
-```bash
-pip install chalk
-```
-
-If you use Windows, consider replacing your operating system with something 
-decent that is not trying to spy on you 🧐. 
-
-Usage
------
-
-To get started with Chalk, simply run the `chalk init` command in your terminal.
-It will create a chalk.toml configuration file and the necessary directory
-structure for your classroom.
-
-
-Directory Structure
+Directory structure
 -------------------
-
-Chalk organizes its data in a simple directory structure. Each classroom is
-stored in a separate directory, which contains text files for students,
-quizzes and grades. A basic structure looks like this:
 
 ```
 classroom/
-├── reports/
-│   ├── midterm.grades.csv
-│   └── final.grades.csv
-├── data/
-│   ├── ...
-│   ├── student_n/
-│   └── conf.yaml
-├── midterm/
-│   ├── student_1/
-│   ├── ...
-│   ├── student_n/
-│   └── conf.yaml
-├── final/
-│   └── conf.yaml
-├── chalk.toml
-└── roster.csv
+├── chalk.toml           # classroom configuration
+├── roster.csv           # students
+├── conf.py              # optional: final_grade() and other hooks
+└── p1/                  # a quiz: any directory with a conf.yaml
+    ├── conf.yaml        # name, dates, weight and chalk settings of questions
+    ├── questions/       # question documents in the mdq format
+    │   ├── q1.md
+    │   └── q2.yaml
+    ├── q3/              # files of question q3: autograder script, template/
+    ├── submissions.csv  # one row per student, one column per question
+    └── grades.csv       # written by chalk
 ```
 
-Data can be stored in a variety of formats, including JSON, CSV, XLSX, YAML and
-more. This flexibility allows teachers to choose the format that best suits
-their needs and preferences.
 
+Questions
+---------
 
-Basic commands
---------------
+Objective questions are [mdq](https://pypi.org/project/mdq/) documents in
+`<quiz>/questions/`, named after the question id. The document may be
+Markdown (`.md`, `.mdq.md`) or the parsed form of mdq in YAML or JSON. It
+holds the stem, the choices and the answer key, and chalk grades responses
+with mdq.
 
-- `chalk init`: Initializes a new classroom.
-- `chalk add -is <student_id>`: Adds a new student to the roster.
-- `chalk add -ia <quiz_name>`: Adds a new quiz to the classroom.
-- `chalk grade -is <student_id>`: Assigns a grade to a student for a specific quiz.
-- `chalk report -a <quiz_name>`: Generates a report for a specific quiz.
-- `chalk report -s <student_id>`: Generates a report for a specific student.
+```markdown
+---
+id: q1
+title: Capital
+---
 
+What is the capital of Brazil?
 
-File formats
-------------
-
-### Roster
-
-The roster can be stored in a table form (e.g., CSV, XLSX) or a list form (e.g.,
-JSON, YAML). Columns simply correspond to fields in the student model, and empty
-cells are translated to null values.
-
-**Examples**
-
-A almost minimal example of a roster in CSV 
-
-```csv
-id,name,email
-1234,John Doe,john.doe@example.com
-5678,Alice Smith,
+- [*] [df] Brasília
+- [ ] [sp] São Paulo
 ```
-and YAML
+
+`conf.yaml` lists the questions in order and keeps what is specific to chalk:
 
 ```yaml
-- id: "1234"
-  name: "John Doe"
-  email: "john.doe@example.com"
-- id: "5678"
-  name: "Alice Smith"
+name: Exam 1
+weight: 1
+questions:
+  - id: q1             # mdq document in questions/q1.md
+  - id: q2
+    value: 2           # weight of the question in the quiz
+  - id: q3             # no document: an open question, graded by hand
+  - id: q4
+    type: text         # free text, graded by an autograder script or a regex
+    format: python
+  - id: q5
+    type: repo         # the answer is a directory, graded by a script
 ```
 
-The columns `name` and `id` are required. Additional optional columns are:
-
-- `age`: The student's age.
-- `email`: The student's email address.
-- `github`: The student's GitHub username.
-- `email_alt`: The student's alternative email address
-
-
-### Simple quizzes
-
-A simple quiz store all information (including grades and submission data)
-in a single file. The example below shows a simple quiz in YAML.
-
-```yaml
-name: "Midterm Exam"
-data:
-  "1234":
-    q1: 
-      answer: "42"
-      grade: 100
-    q2:
-      answer: "Rio de Janeiro"
-      grade: 0
-      feedback: "The capital moved to Brasilia in 1960."
-  "5678":
-    q1:
-      answer: "0"
-      grade: 50
-    q2:
-      answer: "Brasilia"
-      grade: 100
-```
-
-The table representation is a little more complex since it must handle nested data.
-The table can be stored in a single file like so:
+Answers in `submissions.csv` follow the mdq responses: the id of a choice (or
+its text) for multiple choice, a list of ids such as `a, c` or `[a, c]` for
+multiple selection, a number for numeric questions and text for the others.
 
 ```csv
-id,q1.answer,q1.grade,q2.answer,q2.grade,q2.feedback
-1234,42,100,Rio de Janeiro,0,"The capital moved to Brasilia in 1960."
-5678,0,50,Brasilia,100,
+id,q1,q2,q3
+1234,df,"a, c",An open answer
 ```
 
-Or it can be split into multiple files:
+
+Roster
+------
+
+`roster.csv` uses the columns that codehood also uses. Every column is
+optional, and other columns are kept.
 
 ```csv
-# midterm.csv
-id,q1,q2
-1234,42,Rio de Janeiro
-5678,0,Brasilia
+school_id,username,name,email,github,status
+1234,jdoe,John Doe,john.doe@example.com,jdoe,active
 ```
 
-```csv
-# midterm.grades.csv
-id,q1,q2
-1234,100,0
-5678,50,100
+The student id is `school_id`. Set `student_id = "username"` (or another
+column) in the `[chalk]` section of `chalk.toml` to use another column.
+Rosters with an `id` column instead of `school_id` also work.
+
+
+Documentation
+-------------
+
+```bash
+uv sync --group dev
+uv run mkdocs serve
 ```
-
-```csv
-# midterm.feedback.csv
-id,q1,q2
-1234,,"The capital moved to Brasilia in 1960."
-5678,,
-```
-
-The csv might add an optional row with an empty id to specify additional
-information:
-
-```csv
-id,q1.answer,q2.answer,q1.grade,q2.grade,q1.feedback,q2.feedback
-,42,Rio de Janeiro,100,100,,
-```
-

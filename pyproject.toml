@@ -53,6 +53,7 @@ docs = { cmd = "uv run mkdocs build", help = "Build HTML documentation" }
 docs-serve = { cmd = "uv run mkdocs serve", help = "Serve HTML documentation with live reload" }
 test = "pytest tests"
 lint = "ruff check ."
+check = { cmd = "ruff check . && pytest -q tests && mkdocs build --strict -q", help = "Lint, tests and docs: run before every commit" }
 build = "uv build"
 
 [tool.uv.build-backend]

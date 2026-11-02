@@ -406,7 +406,6 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         Return a cleaned copy of the table by removing empty columns.
 
         Args:
-            table: The table data as a list of dictionaries.
             keep: A set of column names to always keep even if they are empty.
             remove: A set of column names to remove even if they are not empty.
         """

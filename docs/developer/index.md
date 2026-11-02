@@ -4,7 +4,7 @@ Developer docs are focused on implementation details and generated API reference
 
 ## Contents
 
-- API Reference: generated from source in src/chalk using mkdocstrings.
+- API Reference: generated from the source in chalk/ using mkdocstrings.
 
 ## Local workflow
 

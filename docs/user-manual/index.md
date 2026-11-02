@@ -1,16 +1,23 @@
 # User Manual
 
-The user manual documents Chalk from a command-line user perspective.
+Chalk keeps a classroom in a directory of text files. The README of the
+project shows the layout, the question
+and roster formats, and a quick start. This manual adds the details.
 
-## Style
+- [Commands](commands.md): the command tree.
+- [Autograding scripts](autograding-scripts.md): how chalk runs a grading
+  script for each answer.
 
-Command pages follow a traditional man page structure:
+## Sharing a repository with codehood
 
-1. NAME
-2. SYNOPSIS
-3. DESCRIPTION
-4. OPTIONS
-5. EXAMPLES
-6. SEE ALSO
+A chalk classroom and a codehood course can live in the same directory.
+codehood only reads its own files (`codehood.toml`, `README.md`,
+`calendar.md`, `grades.csv`, `grades.py`, `questions/`, `exams/` and
+`resources/`), and chalk only treats as a quiz a directory with a
+`conf.yaml`. Both read `roster.csv`, in the format described in the README.
 
-Use the Man Pages section in the navigation for command-specific references.
+`chalk codehood grades` writes one column per quiz to `grades.csv`, with the
+quiz grade in percent, keyed by the roster's id column (`school_id` by
+default). Columns that are not quizzes and rows of students outside the
+roster are kept, so the file can also hold scores typed by hand. The course's
+`grades.py` reads the quiz columns from `student.scores`.
