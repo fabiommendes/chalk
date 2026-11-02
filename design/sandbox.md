@@ -2,11 +2,16 @@
 
 Estado em 2026-11-02. Rascunho para discussão.
 
-Caso de uso principal: o aluno entrega um projeto Python (repositório ou
-diretório), o professor tem um template com `pyproject.toml`, `uv.lock` e
-testes pytest, e a nota é `testes que passaram / total de testes`. Hoje cada
-prova monta um sandbox diferente (bubblewrap ou outro). A ideia é o chalk
-trazer perfis prontos e deixar o resto configurável.
+Cenários em `design/historias-correcao.md`. Este documento cobre as duas
+classes de correção que rodam script: **dado** (a resposta é lida por um
+script do professor) e **código** (a resposta é executada). Objetiva (mdq)
+e manual não rodam script e ficam fora daqui.
+
+Caso mais comum da classe código: o aluno entrega um projeto Python, o
+professor tem um template com `pyproject.toml`, `uv.lock` e testes pytest, e
+a nota é `testes que passaram / total de testes`. Hoje cada prova monta um
+sandbox diferente (bubblewrap ou outro). A ideia é o chalk trazer perfis
+prontos e deixar o resto configurável.
 
 
 ## Estado atual
@@ -32,7 +37,45 @@ bwrap montado à mão para cada prova). Problemas concretos:
    Filhos e netos continuam rodando. Não há limite de memória, processos ou
    disco.
 
-Os itens 2, 3 e 5 são bugs e valem correção mesmo sem sandbox.
+Os itens 2, 3 e 5 foram corrigidos no commit `b051cf0`: cópia em vez de
+hard link, ambiente com allowlist (mais `autograder.pass_env`) e grupo de
+processos próprio, morto no timeout e no fim da execução. Falta limite de
+memória, processos e disco.
+
+
+## Dado e código
+
+| | Dado | Código |
+| --- | --- | --- |
+| A resposta do aluno é | lida pelo script | executada |
+| Exemplos | regex, segredo do enunciado, análise de AST | pytest, cargo, elm-test, entrada e saída |
+| Sandbox | não | sim |
+| Timeout, memória, tamanho da resposta | sim | sim |
+| Quem escreve o relatório | o script do professor | o test runner, num processo que o aluno controla |
+
+Na classe dado, o script é confiável e a resposta é só um texto. Os riscos
+são de disponibilidade (regex com backtracking catastrófico, resposta de
+500 MB) e de injeção: se o script imprime a resposta e o chalk procura
+`CHALK_RESULT:` no stdout, uma resposta com essa linha vira nota. Por isso
+o resultado passa a vir só do arquivo de relatório, nunca do stdout, nas
+duas classes.
+
+Quem declara a classe é a questão, no `conf.yaml`, pela chave `sandbox` (ver
+"Configuração"). Cada perfil tem um padrão: os da classe código usam
+`bwrap`; `regex` e `ast` usam `none`; `script` usa `bwrap`, e o professor
+põe `sandbox: none` quando o script só lê a resposta. Assim, esquecer a
+declaração erra para o lado seguro.
+
+Corretores embutidos da classe dado:
+
+- `regex`: o aluno entrega uma regex; o perfil lista exemplos que devem e
+  que não devem casar; nota = acertos / total. Cada exemplo roda num
+  subprocesso com timeout próprio, porque `re` do Python não pode ser
+  interrompido; exemplo que estoura o tempo conta como erro.
+- `ast`: o aluno entrega código que é só parseado (Python, por `ast`); o
+  perfil lista construções exigidas ou proibidas. Nunca executa.
+- `script` com `sandbox: none`: o resto, incluindo segredos do enunciado,
+  que o chalk não trata de forma especial.
 
 
 ## Modelo de ameaças
@@ -105,7 +148,8 @@ pequena. Três camadas:
 3. **Leitor de relatório** (por formato, não por linguagem): JUnit XML cobre
    quase tudo (`pytest --junit-xml`, `elm-test --report junit`, jest,
    `cargo nextest`, `gotestsum`). O `result_extractor` atual (JSON do chalk,
-   JSON do pytest, linha `CHALK_RESULT:`) continua para o perfil `script`.
+   JSON do pytest) continua para o perfil `script`; a linha `CHALK_RESULT:`
+   no stdout sai (ver "Dado e código").
 
 Linguagem nova vira perfil novo em `chalk.toml`, sem código no chalk, desde
 que o test runner gere JUnit.
@@ -194,8 +238,9 @@ rodada, não em 80 alunos com nota zero.
   distribuição, de pacotes de sistema que o professor não tem, ou de rede
   com servidores simulados (ver "Rede"). Configuração mais trabalhosa, por
   isso não é o padrão.
-- `none`. Sem isolamento. Só com `--unsafe` explícito na linha de comando,
-  para depurar o próprio template.
+- `none`. Sem isolamento, mas com timeout e limites. Padrão dos perfis da
+  classe dado. Num perfil da classe código, só vale com `--unsafe` na linha
+  de comando, para depurar o próprio template.
 
 Limites de recurso: `systemd-run --user --scope -p MemoryMax=... -p
 TasksMax=...` quando disponível, senão `prlimit` (CPU, memória, tamanho de
@@ -278,9 +323,10 @@ corretos / total. Comparação exata, por linhas ignorando espaços finais, ou
 por um script do professor. Cobre exercícios estilo juiz online em C sem
 framework de teste.
 
-Outros perfis, sob demanda: `script` (o script do professor atual, agora
-dentro do sandbox), `python-stdin` (entrada e saída comparadas),
-`node-test`.
+**`script`**: o script do professor de hoje, com as variáveis `CHALK_*`.
+Roda no sandbox por padrão; com `sandbox: none`, fora dele (classe dado).
+
+Outros perfis, sob demanda: `node-test`.
 
 
 ## Configuração
@@ -292,7 +338,7 @@ questions:
   - id: q1
     type: repo
     autograder:
-      sandbox: python-pytest
+      profile: python-pytest
       timeout: 60
       limits:
         memory: 1G
@@ -302,34 +348,47 @@ questions:
   - id: q2
     type: repo
     autograder:
-      sandbox: rust-cargo
+      profile: rust-cargo
       build:
         timeout: 180      # sobrescreve só a etapa de build
       on_build_error: manual   # zero | manual
+  - id: q3
+    autograder:
+      profile: regex
+      match: [ana@unb.br, x.y@a.com]
+      reject: ["@unb.br", "ana@"]
+  - id: q4
+    autograder:
+      profile: script
+      script: segredo.py
+      sandbox: none       # o script só lê a resposta
 ```
 
-- `sandbox` escolhe o perfil; as outras chaves sobrescrevem os padrões dele.
+- `profile` escolhe o perfil; as outras chaves sobrescrevem os padrões dele.
   Chaves no nível do autograder valem para todas as etapas; `build:`,
   `test:` e `prepare:` sobrescrevem uma etapa só.
-- `sandbox: script` com `script:` roda o script do professor dentro do
-  sandbox, cobrindo os casos que o perfil não prevê.
+- `sandbox` escolhe o backend (`bwrap`, `podman`, `none`); o padrão vem do
+  perfil.
+- Sem `profile`, uma questão com `script:` usa o perfil `script`, como hoje.
 - Perfis próprios do professor ficam em `chalk.toml` (`[sandbox.<nome>]`,
   herdando de um perfil embutido), para reaproveitar entre provas.
 
 
 ## Fases
 
-1. Corrigir os bugs 2, 3 e 5 do "Estado atual" (sem sandbox ainda).
-2. Backend `bwrap` com o perfil `script`: o script atual passa a rodar
+1. ~~Corrigir os bugs 2, 3 e 5 do "Estado atual".~~ Feito (`b051cf0`).
+2. Resultado só pelo arquivo de relatório; limites de memória e tamanho da
+   resposta; chaves `profile` e `sandbox`; perfil `regex`.
+3. Backend `bwrap` com o perfil `script`: o script atual passa a rodar
    isolado, com relatório fora da área do aluno.
-3. Perfil `python-pytest` com preparo em cache, nota pela lista coletada e
+4. Perfil `python-pytest` com preparo em cache, nota pela lista coletada e
    `chalk autograde --check`. Leitor JUnit.
-4. Etapa `build` e perfil `rust-cargo`, com cache de `target/` em overlay e
+5. Etapa `build` e perfil `rust-cargo`, com cache de `target/` em overlay e
    o resultado `build-error`.
-5. Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração serve
+6. Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração serve
    sem código novo.
-6. Perfis em `chalk.toml` e rede `services`.
-7. Backend `podman` com rede `internal`.
+7. Perfis em `chalk.toml` e rede `services`.
+8. Backend `podman` com rede `internal`.
 
 
 ## Decisões tomadas
