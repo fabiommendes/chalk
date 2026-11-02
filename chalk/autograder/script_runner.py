@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import pty
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -29,7 +30,24 @@ __all__ = [
 ]
 log = getLogger(__name__)
 
-REEXPORT_VARIABLES = ["PATH", "LD_LIBRARY_PATH", "PYTHONPATH", "PYTHONHOME"]
+#: Variables passed from chalk's environment to the autograder script. The
+#: rest (tokens, SSH agent, cloud credentials...) is dropped. Questions can
+#: add more with `autograder.pass_env`.
+PASS_ENV = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TMPDIR",
+    "TZ",
+    "LD_LIBRARY_PATH",
+    "PYTHONPATH",
+    "PYTHONHOME",
+)
 ANSI_REGEX = re.compile(r"(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
 
 
@@ -86,12 +104,22 @@ class ScriptRunner:
             stdout=self._slave_pty_fd if capture_output else None,
             stderr=self._slave_pty_fd if capture_output else None,
             stdin=subprocess.DEVNULL,
+            # Own process group, so a timeout kills the whole tree and not
+            # only the shell.
+            start_new_session=True,
         )
 
     def __del__(self) -> None:
+        self._kill_group()
+
+    def _kill_group(self) -> None:
+        """
+        Kill the script and every process it started that is still alive,
+        including background processes left behind after a normal exit.
+        """
         try:
-            self.process.kill()
-        except Exception:
+            os.killpg(self.process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, AttributeError):
             pass
 
     def run(self) -> Result:
@@ -103,6 +131,7 @@ class ScriptRunner:
         else:
             timeout = self._run_no_capture()
             stdout = ""
+        self._kill_group()
         self._repo.write_file("chalk.stdout", stdout)
 
         # The script may hang (timeout=True), and even so it may generate a valid report file.
@@ -149,7 +178,8 @@ class ScriptRunner:
             if time.time() > deadline:
                 timeout = True
                 log.info(f"Process timed out for student {self._chalk_env.student_id}")
-                process.kill()
+                self._kill_group()
+                process.wait()
                 break
 
             try:
@@ -179,7 +209,8 @@ class ScriptRunner:
             timeout = False
         except subprocess.TimeoutExpired:
             log.info(f"Process timed out for student {self._chalk_env.student_id}")
-            self.process.kill()
+            self._kill_group()
+            self.process.wait()
             timeout = True
         finally:
             os.close(self._master_pty_fd)
@@ -232,11 +263,15 @@ class ChalkEnv:
     quiz_id: QuizId
     student_id: StudentId
     result_file: str = "graded.*"
+    pass_env: tuple[str, ...] = ()
 
-    def to_env_dict(self, path: Path, keep_env: bool = True) -> dict[str, str]:
+    def to_env_dict(self, path: Path) -> dict[str, str]:
         """
         Create the environment variables to be passed to the autograder script
         for a job executed from the given path.
+
+        Only the variables in PASS_ENV and in pass_env come from chalk's own
+        environment.
         """
 
         report = self.result_file
@@ -253,7 +288,7 @@ class ChalkEnv:
             "CHALK_ASSIGNMENT": self.quiz_id,
         }
 
-        for var in os.environ if keep_env else REEXPORT_VARIABLES:
+        for var in (*PASS_ENV, *self.pass_env):
             if var in os.environ:
                 base[var] = os.environ[var]
         return base

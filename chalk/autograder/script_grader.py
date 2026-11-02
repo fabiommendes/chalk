@@ -64,6 +64,7 @@ class ScriptGrader(Grader[str | Path]):
                     question_id=self.question.id,
                     quiz_id=self.question.quiz.id,
                     student_id=id,
+                    pass_env=tuple(self.conf.pass_env),
                 ),
                 timeout=timeout,
                 on_output_line=on_output_line,
@@ -106,7 +107,9 @@ class ScriptGrader(Grader[str | Path]):
                 answer_content = answer.encode("utf-8")
 
             if template or student_repo:
-                repo.sync_template(template=template, student_repo=student_repo, copy_mode="link")
+                # Never link: the student code could write through a hard link
+                # and change the template for everyone graded afterwards.
+                repo.sync_template(template=template, student_repo=student_repo, copy_mode="copy")
                 log.debug(f"Copied template repository for {student_id}")
 
             repo.write_file(

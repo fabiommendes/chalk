@@ -139,6 +139,8 @@ class SubmissionGrade(BaseModel):
 # ==============================================================================
 type ResponseId = str
 type ChoiceId = str
+
+
 def _question_tag(value: Any) -> str:
     typ = value.get("type") if isinstance(value, dict) else getattr(value, "type", None)
     return "generic" if typ is None else str(typ)
@@ -293,6 +295,15 @@ class Autograder(BaseModel):
             ),
         ),
     ] = None
+    pass_env: Annotated[
+        list[str],
+        Field(
+            description=(
+                "Environment variables passed from chalk to the autograder script, besides "
+                "PATH, HOME, locale and a few others. Everything else is dropped."
+            ),
+        ),
+    ] = []
     command: Annotated[
         str | None,
         Field(
