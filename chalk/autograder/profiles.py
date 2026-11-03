@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import shutil
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from fractions import Fraction
 from logging import getLogger
 from pathlib import Path
@@ -84,13 +84,13 @@ def install_trusted_files(
     return overlays
 
 
-def read_report(path: Path, expected: Mapping[TestKey, str]) -> Graded:
+def read_report(path: Path, expected: Mapping[TestKey, str], extra: Sequence[str] = ()) -> Graded:
     if path.stat().st_size > MAX_RESULT_SIZE:
         return Graded(dq.Error(), feedback="Test report is too large.")
-    return score_report(path.read_text(errors="replace"), expected)
+    return score_report(path.read_text(errors="replace"), expected, extra)
 
 
-def score_report(src: str, expected: Mapping[TestKey, str]) -> Graded:
+def score_report(src: str, expected: Mapping[TestKey, str], extra: Sequence[str] = ()) -> Graded:
     """
     Score a JUnit report against the expected tests, a map from the
     (classname, name) pair in the report to the name shown in the feedback.
@@ -98,43 +98,51 @@ def score_report(src: str, expected: Mapping[TestKey, str]) -> Graded:
     A test passes when it is in the report without failure, error or skip.
     Missing tests, tests skipped by the student's code and repeated entries
     with a failure count as failures. Tests not in the expected list are
-    ignored.
+    ignored. The JUnit reports of the services in extra count as part of the
+    report.
     """
     try:
-        root = ET.fromstring(src)
+        results, errors = junit_results(src)
     except ET.ParseError as e:
         return Graded(dq.Error(), feedback=f"Invalid JUnit report: {e}")
+    return _score(expected, results, errors, extra)
 
-    outcomes: dict[TestKey, bool] = {}
-    messages: dict[TestKey, str] = {}
+
+def junit_results(src: str) -> tuple[dict[TestKey, str | None], list[str]]:
+    """
+    Outcome of each test in a JUnit report, None when it passed or the
+    failure message, and the collection errors (entries without class name).
+
+    Raises ET.ParseError for an invalid report.
+    """
+    root = ET.fromstring(src)
+    results: dict[TestKey, str | None] = {}
     errors: list[str] = []
     for case in root.iter("testcase"):
         key = (case.get("classname") or "", case.get("name") or "")
         problems = [
             p for tag in ("failure", "error", "skipped") if (p := case.find(tag)) is not None
         ]
-        outcomes[key] = outcomes.get(key, True) and not problems
-        if problems and key not in messages:
-            messages[key] = _message(problems[0])
+        if problems and results.get(key) is None:
+            results[key] = _message(problems[0])
+        else:
+            results.setdefault(key, None)
         if not key[0] and (error := case.find("error")) is not None:
             errors.append(f"- {key[1]}: {error.get('message') or 'error'}")
-
-    unknown = [k for k in outcomes if k not in expected and k[0]]
-    if unknown:
-        log.warning(f"Report has {len(unknown)} tests that are not in the template: {unknown[:5]}")
-
-    failures = {k: messages.get(k, "") if k in outcomes else "(not run)" for k in expected}
-    return _graded(
-        expected, {k: m for k, m in failures.items() if outcomes.get(k) is not True}, errors
-    )
+    return results, errors
 
 
 def read_stdio_report(
-    path: Path, expected: Mapping[TestKey, str], template: Path, mode: str
+    path: Path,
+    expected: Mapping[TestKey, str],
+    template: Path,
+    mode: str,
+    extra: Sequence[str] = (),
 ) -> Graded:
     """
     Score the report of chalk's stdio runner: each case passes when it ran
-    without error and its output matches the template's `.out` file.
+    without error and its output matches the template's `.out` file. The
+    JUnit reports of the services in extra count as part of the report.
     """
     from .runners.stdio import compare
 
@@ -145,18 +153,19 @@ def read_stdio_report(
     except (ValueError, KeyError, TypeError) as e:
         return Graded(dq.Error(), feedback=f"Invalid stdio report: {e}")
 
-    failures: dict[TestKey, str] = {}
+    results: dict[TestKey, str | None] = {}
     for key in expected:
+        if key[0] != "stdio":
+            continue
         case = cases.get(key[1])
         if not isinstance(case, dict):
-            failures[key] = "(not run)"
+            continue
         elif case.get("error"):
-            failures[key] = str(case["error"])
+            results[key] = str(case["error"]) or "error"
         else:
             want = (template / f"{key[1]}.out").read_text(errors="replace")
-            if (diff := compare(str(case.get("output") or ""), want, mode)) is not None:
-                failures[key] = diff
-    return _graded(expected, failures, [])
+            results[key] = compare(str(case.get("output") or ""), want, mode)
+    return _score(expected, results, [], extra)
 
 
 def stdio_keys(src: str) -> list[TestKey]:
@@ -167,6 +176,34 @@ def stdio_keys(src: str) -> list[TestKey]:
         return [("stdio", str(c["name"])) for c in json.loads(src)["cases"]]
     except (ValueError, KeyError, TypeError):
         return []
+
+
+def _score(
+    expected: Mapping[TestKey, str],
+    results: dict[TestKey, str | None],
+    errors: list[str],
+    extra: Sequence[str],
+) -> Graded:
+    for src in extra:
+        try:
+            more, _ = junit_results(src)
+        except ET.ParseError as e:
+            errors.append(f"- invalid service report: {e}")
+            continue
+        for key, message in more.items():
+            if results.get(key) is None:
+                results[key] = message
+
+    unknown = [k for k in results if k not in expected and k[0]]
+    if unknown:
+        log.warning(f"Report has {len(unknown)} tests that are not in the template: {unknown[:5]}")
+
+    failures = {
+        k: "(not run)" if k not in results else results[k] or ""
+        for k in expected
+        if results.get(k, "") is not None
+    }
+    return _graded(expected, failures, errors)
 
 
 def _graded(

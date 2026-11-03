@@ -15,7 +15,9 @@ Steps, with different levels of trust:
 3. Build (untrusted, in the sandbox, offline, optional): a failure gives the
    `build-error` result, with the compiler output as feedback.
 4. Test (untrusted, in the sandbox, offline): writes a JUnit report to
-   $CHALK_RESULT.
+   $CHALK_RESULT. The services of the profile, if any, run during this step
+   in sandboxes of their own (see services.py), and their reports join the
+   test report.
 5. Score (trusted, in chalk): only the expected tests count, and a test
    missing from the report counts as a failure.
 
@@ -35,7 +37,7 @@ import subprocess
 import sys
 import tomllib
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from functools import cache
@@ -60,6 +62,7 @@ from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
 from .script_grader import ScriptGrader
 from .script_runner import ChalkEnv, Result, Sandbox, ScriptRunner
+from .services import RUNNERS, Services
 
 __all__ = ["ProfileGrader", "builtin_profiles", "render", "resolve_profile", "seed_workdir"]
 
@@ -68,11 +71,11 @@ log = getLogger(__name__)
 #: Largest compiler output kept as feedback, in characters.
 MAX_BUILD_FEEDBACK = 8000
 
-#: Files chalk ships for the profiles: the stdio runner and chalk_test.h.
-RUNNERS = Path(__file__).parent / "runners"
-
 #: Profiles implemented in Python, not as data.
 CODE_PROFILES = ("script", "regex")
+
+#: Reads the report of the test step, given the reports of the services.
+type Reader = Callable[[Path, Sequence[str]], Graded]
 
 _VARIABLE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -230,20 +233,20 @@ class ProfileGrader(ScriptGrader):
             sandbox=sandbox,
         )
 
-    def _reader(self, prepared: Prepared) -> Callable[[Path], Graded]:
+    def _reader(self, prepared: Prepared) -> Reader:
         expected = prepared.tests
         if self.spec.report == "stdio":
             template = self._template()
             mode = prepared.variables.get("compare", "lines")
-            return lambda path: read_stdio_report(path, expected, template, mode)
-        return lambda path: read_report(path, expected)
+            return lambda path, extra: read_stdio_report(path, expected, template, mode, extra)
+        return lambda path, extra: read_report(path, expected, extra)
 
     def _run_steps(
         self,
         repo: Repo,
         prepared: Prepared,
         *,
-        reader: Callable[[Path], Graded],
+        reader: Reader,
         env: ChalkEnv,
         timeout: float,
         on_output_line: Callable[[str], None] | None,
@@ -293,15 +296,48 @@ class ProfileGrader(ScriptGrader):
                 return self._build_error(result)
 
         test = self.spec.test
-        return ScriptRunner(
-            None,
-            repo,
-            command=self._command(test.command, variables),
-            result_reader=reader,
-            timeout=test.timeout or timeout,
-            limits=test.limits or self.conf.limits,
-            **run,
-        ).run()
+        command = self._command(test.command, variables)
+        services = None
+        if self.spec.services:
+            if sandbox is None:
+                raise PrepareError(f"the services of the {self.name} profile need the sandbox")
+            services = Services(
+                self.spec.services,
+                template=self._template(),
+                render=lambda text, extra: render(text, {**variables, **extra}),
+                readable=[Path(render(p, variables)).expanduser() for p in self.spec.readable],
+                env={
+                    "CHALK_STUDENT": env.student_id,
+                    "CHALK_QUESTION": env.question_id,
+                    "CHALK_ASSIGNMENT": env.quiz_id,
+                },
+            )
+            if (error := services.start()) is not None:
+                services.stop(repo)
+                return Result(return_code=1, score=dq.Error(), feedback=error)
+            run["sandbox"] = replace(
+                sandbox,
+                readable=(*sandbox.readable, services.sockets, RUNNERS),
+                hidden=(*sandbox.hidden, services.root),
+            )
+            command = services.forward(command)
+
+        def read(path: Path) -> Graded:
+            return reader(path, services.stop(repo) if services else [])
+
+        try:
+            return ScriptRunner(
+                None,
+                repo,
+                command=command,
+                result_reader=read,
+                timeout=test.timeout or timeout,
+                limits=test.limits or self.conf.limits,
+                **run,
+            ).run()
+        finally:
+            if services is not None:
+                services.stop(repo)
 
     def _build_error(self, build: Result) -> Result:
         output = build.stdout or ""
@@ -385,9 +421,11 @@ class ProfileGrader(ScriptGrader):
 
         parse = stdio_keys if self.spec.report == "stdio" else junit_keys
 
-        def collect(path: Path) -> Graded:
+        def collect(path: Path, extra: Sequence[str]) -> Graded:
             if path.stat().st_size <= MAX_RESULT_SIZE:
                 keys.extend(parse(path.read_text(errors="replace")))
+            for src in extra:
+                keys.extend(junit_keys(src))
             return Graded(Fraction(1))
 
         result = self._run_steps(
@@ -413,9 +451,7 @@ class ProfileGrader(ScriptGrader):
                 f"the reference run of the {self.name} profile has no tests in its "
                 f"report{self._hint()}:\n{details}".rstrip()
             )
-        if self.spec.report == "stdio":
-            return {key: key[1] for key in keys}
-        return {key: "::".join(key) for key in keys}
+        return {key: key[1] if key[0] == "stdio" else "::".join(key) for key in dict.fromkeys(keys)}
 
     def _env(self, variables: Mapping[str, str]) -> dict[str, str | None]:
         env: dict[str, str | None] = {k: render(v, variables) for k, v in self.spec.env.items()}

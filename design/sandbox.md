@@ -257,18 +257,23 @@ professor sobe. Acesso livre à internet é raro e exige opção explícita.
 | Modo | Backend | O que o aluno alcança |
 | --- | --- | --- |
 | `none` (padrão) | bwrap | só o loopback do próprio sandbox |
-| `services` | bwrap | loopback, com serviços do professor iniciados dentro do sandbox antes dos testes |
+| `services` | bwrap | loopback, com as portas dos serviços do professor, cada um no seu próprio sandbox |
 | `internal` | podman | uma rede interna (`podman network create --internal`) com contêineres de serviço do professor, sem saída para fora |
 | `host` | bwrap ou podman | a rede da máquina; só com opção explícita |
 
 - `services` cobre o caso comum (um servidor HTTP ou banco que a questão
-  usa) sem podman: o perfil declara os comandos, o chalk os inicia dentro
-  do mesmo namespace de rede e espera as portas abrirem. Como os serviços
-  dividem o sandbox com o aluno, o aluno pode alterá-los; serve para
-  simulação, não para guardar segredo.
-- `internal` é para quando o serviço precisa ficar fora do alcance do aluno
-  (ele só fala com o serviço pela rede) ou é uma imagem pronta (Postgres,
-  Redis, um servidor de referência). Os contêineres de serviço sobem uma
+  usa) sem podman. O perfil declara os comandos e as portas
+  (`services.<nome>`); cada serviço roda num sandbox bwrap próprio, com
+  loopback próprio, numa cópia do template. O aluno chega nele por um
+  socket Unix num diretório montado nos dois sandboxes: um encaminhador
+  (`runners/net.py forward`) escuta na porta dentro do sandbox do aluno e
+  outro (`net.py serve`) repassa para a porta do serviço. O aluno não vê
+  os processos nem os arquivos do serviço, então o serviço pode dar nota:
+  ao receber SIGTERM, grava um JUnit em `$CHALK_RESULT`, que entra na nota
+  junto com o relatório da etapa de testes. Sobe e para a cada execução,
+  então cada aluno encontra o mesmo estado.
+- `internal` fica para imagens prontas (Postgres, Redis, um servidor de
+  referência) que não rodam bem fora de contêiner. Os contêineres de serviço sobem uma
   vez por questão e são compartilhados; se o estado entre alunos importa, o
   perfil pede reinício por aluno.
 - Lista de destinos permitidos na internet (`allow: [api.exemplo.br]`)
@@ -408,8 +413,14 @@ questions:
    direto (`rustc --print sysroot`), sem os proxies do rustup. Só testes
    de integração (`tests/`) contam. `on_build_error` aceita `build-error`
    (padrão), `zero` e `manual`.
-6. ~~Perfis em `chalk.toml`~~ (feito antes da fase de perfis novos, que
-   dependia disso) e rede `services` (falta). `python-pytest` e
+6. ~~Perfis em `chalk.toml` e rede `services`~~. Os perfis foram feitos
+   antes da fase de perfis novos, que dependia deles. A rede `services`
+   mudou em relação ao desenho: os serviços não dividem o sandbox com o
+   aluno (ver [Rede](#rede)), porque o caso principal é dar nota pelo que
+   o servidor recebeu, e o aluno no mesmo sandbox poderia forjar o
+   registro. Custa um bwrap e a cópia do template por serviço e por
+   execução (cerca de 0,1 s mais o tempo de subida do servidor). Não há
+   chave `network: services`: ter `services` no perfil basta. `python-pytest` e
    `rust-cargo` viraram dados em `chalk/autograder/profiles.toml`, e um
    único `ProfileGrader` executa qualquer perfil. Mudanças em relação ao
    desenho:

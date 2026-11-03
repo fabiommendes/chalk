@@ -511,10 +511,11 @@ env.PYTHONHASHSEED = "42"
 | `build.command` | Optional build step. A failure is a build error. `build.seed` copies cache paths to the working directory first. |
 | `test.command` | Test step. It writes a JUnit report to `$CHALK_RESULT`. |
 | `report` | `junit` (default), or `stdio` for the report of chalk's stdio runner. |
+| `services` | Servers the student's code talks to during the test step. See [Services](#services). |
 
 Strings can use the variables `{cache}`, `{template}`, `{workdir}`,
 `{tests}`, `{PATH}`, `{python}` (the Python running chalk), `{runners}`
-(the directory with the stdio runner and `chalk_test.h`), the `vars` and
+(the directory with chalk's runners and `chalk_test.h`), the `vars` and
 the probe names. Commands get them shell-quoted,
 so `{cache}/run.sh` is safe with spaces. Unknown names such as `${HOME}`
 are left for the shell.
@@ -527,6 +528,73 @@ happens every time chalk grades.
 
 The steps run with the environment described in [Sandbox](#sandbox):
 `$HOME` and `/tmp` are empty, and the network is off except in `prepare`.
+
+### Services
+
+For questions where the student writes a client (code that calls an HTTP
+API, a chat bot, a database driver), the profile declares the servers the
+client talks to. Chalk starts them before the test step of each run and
+stops them after it, so every student finds the same state.
+
+```toml
+# chalk.toml
+[profiles.api-client]
+extends = "python-pytest"
+hide = ["server/**"]
+services.api.command = "{python} -I server/main.py"
+services.api.port = 8080
+```
+
+- Each service runs in its own sandbox, in a copy of the template, with
+  the network off. It listens on `127.0.0.1` at its port.
+- The student's code reaches it at `localhost:<port>`, and nothing else.
+  It cannot see the service's files or processes, so it cannot read its
+  data, stop it or change what it records.
+- A service may write a JUnit report to `$CHALK_RESULT` when it gets
+  `SIGTERM`. Its tests count in the grade like the tests of the test step,
+  so the grade can depend on what the server received: the right requests,
+  the authentication header, the order of the calls. The tests come from
+  the reference run, as for the test step.
+- `hide` removes the server's code from the student's working directory,
+  where the template copy would put it.
+- The output of each service goes to `chalk.service.<name>` in the working
+  directory, kept with `--keep-files`.
+
+| Key | Meaning |
+| --- | --- |
+| `command` | Shell command that starts the service, in a copy of the template. `{workdir}` is that copy. |
+| `port` | TCP port the service listens on, also the port the student's code uses. |
+| `env` | Environment variables of the service. It also gets `$CHALK_STUDENT`, `$CHALK_QUESTION` and `$CHALK_ASSIGNMENT`. |
+| `start_timeout` | Seconds the service has to open its port (default 10). |
+
+A server in Python that checks one request:
+
+```python
+# template/server/main.py
+import json, os, signal, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+received = []
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        received.append(self.rfile.read(int(self.headers["Content-Length"])))
+        self.send_response(201)
+        self.end_headers()
+
+def report(*_):
+    ok = any(json.loads(body) == {"name": "pen"} for body in received)
+    failure = "" if ok else '<failure message="no POST with the new item"/>'
+    with open(os.environ["CHALK_RESULT"], "w") as f:
+        f.write(f'<testsuite><testcase classname="api" name="creates_item">'
+                f'{failure}</testcase></testsuite>')
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, report)
+HTTPServer(("127.0.0.1", 8080), Handler).serve_forever()
+```
+
+Services need the bwrap sandbox.
 
 ### Checking the autograder
 

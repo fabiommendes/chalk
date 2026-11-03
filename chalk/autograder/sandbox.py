@@ -65,6 +65,7 @@ def bwrap_command(
     overlays: Iterable[tuple[Path, Path]] = (),
     network: bool = False,
     env: dict[str, str] | None = None,
+    hidden: Iterable[Path] = (),
 ) -> list[str]:
     """
     Command line that runs the shell command inside the sandbox.
@@ -79,10 +80,11 @@ def bwrap_command(
             directories, to protect files inside the working directory.
         network: share the host network.
         env: environment of the command, used to find PATH and HOME.
+        hidden: other directories replaced by empty tmpfs mounts.
     """
     env = os.environ if env is None else env
     home = env.get("HOME")
-    hidden = [*HIDDEN]
+    hidden = [*HIDDEN, *(str(p.resolve()) for p in hidden)]
     if home and not _inside(Path(home), hidden):
         hidden.append(home)
 

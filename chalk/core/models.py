@@ -333,6 +333,39 @@ class PrepareStep(BaseModel):
     ] = None
 
 
+class Service(BaseModel):
+    """
+    A program the student's code talks to through the network, such as an
+    HTTP server, started before the test step of each run in a sandbox of
+    its own.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: Annotated[
+        str,
+        Field(
+            description=(
+                "Shell command that starts the service, run in a copy of the template. It "
+                "listens on 127.0.0.1 at `port` and may write a JUnit report to "
+                "$CHALK_RESULT when it gets SIGTERM; its tests count in the grade."
+            ),
+        ),
+    ]
+    port: Annotated[
+        int,
+        Field(ge=1, le=65535, description="TCP port of the service, the same for the student."),
+    ]
+    env: Annotated[
+        dict[str, str],
+        Field(description="Environment variables of the service."),
+    ] = {}
+    start_timeout: Annotated[
+        float,
+        Field(gt=0, description="Seconds the service has to open the port."),
+    ] = 10
+
+
 class Profile(BaseModel):
     """
     Grading recipe for one ecosystem, written as data: the commands of each
@@ -408,6 +441,16 @@ class Profile(BaseModel):
         Field(description="Files written to the cache directory: name -> content."),
     ] = {}
     prepare: PrepareStep = Field(default_factory=PrepareStep)
+    services: Annotated[
+        dict[str, Service],
+        Field(
+            description=(
+                "Services started for the test step, each in its own sandbox. The student's "
+                "code reaches them at 127.0.0.1 on their ports, and cannot see their files or "
+                "processes."
+            ),
+        ),
+    ] = {}
     build: ProfileStep | None = None
     test: ProfileStep
     report: Annotated[

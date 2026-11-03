@@ -138,6 +138,7 @@ class ScriptRunner:
                 overlays=sandbox.overlays,
                 network=sandbox.network,
                 env=env,
+                hidden=sandbox.hidden,
             )
 
         self.process = subprocess.Popen(
@@ -326,6 +327,8 @@ class Sandbox:
     readable: tuple[Path, ...] = ()
     #: (source, target) files mounted read only over the working directory.
     overlays: tuple[tuple[Path, Path], ...] = ()
+    #: Directories replaced by empty tmpfs mounts, besides sandbox.HIDDEN.
+    hidden: tuple[Path, ...] = ()
 
 
 @dataclass
