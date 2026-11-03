@@ -1,6 +1,5 @@
 """
-Parts shared by the profiles that run the template tests (python-pytest,
-rust-cargo): replacing the student's copies of trusted files and scoring a
+Parts of the profiles that run the template tests: replacing the student's copies of trusted files and scoring a
 JUnit report against the tests collected in the prepare step.
 """
 
@@ -17,7 +16,13 @@ from ..core import disqualification as dq
 from ..core.grader import Graded
 from .result_extractor import MAX_RESULT_SIZE
 
-__all__ = ["PrepareError", "install_trusted_files", "read_report", "score_report"]
+__all__ = [
+    "PrepareError",
+    "check_relative",
+    "install_trusted_files",
+    "read_report",
+    "score_report",
+]
 
 log = getLogger(__name__)
 
@@ -27,9 +32,18 @@ type TestKey = tuple[str, str]
 
 class PrepareError(RuntimeError):
     """
-    The template cannot be prepared: missing lock file, failed dependency
-    install, failed build or failed test collection.
+    The template cannot be prepared: missing lock file, failed probe or
+    dependency install, or a reference run without tests.
     """
+
+
+def check_relative(name: str) -> None:
+    """
+    Reject a path that is not inside the directory it is relative to, or
+    that a command could read as an option.
+    """
+    if name.startswith("-") or Path(name).is_absolute() or ".." in Path(name).parts:
+        raise ValueError(f"path must be relative and inside the directory: {name}")
 
 
 def install_trusted_files(
@@ -44,8 +58,7 @@ def install_trusted_files(
     """
     overlays: list[tuple[Path, Path]] = []
     for name in names:
-        if name.startswith("-") or Path(name).is_absolute() or ".." in Path(name).parts:
-            raise ValueError(f"test path must be relative to the template: {name}")
+        check_relative(name)
         source = template / name
         target = root / name
         if target.is_dir() and not target.is_symlink():

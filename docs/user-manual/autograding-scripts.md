@@ -269,17 +269,18 @@ dependencies (usually in the `dev` group). Grading has three steps:
 
 1. **Prepare**, once per question. `uv sync --frozen` installs the template
    dependencies in a venv under `.chalk/cache/` in the classroom. The venv
-   is reused until `pyproject.toml` or `uv.lock` change. Then pytest
-   collects the test ids from the template, together with `solution/`.
-   Without a solution, the template tests must be collectable on their own.
+   is reused until `pyproject.toml` or `uv.lock` change. Then the tests run
+   on the template with `solution/`, in the sandbox, and the tests in that
+   report are the expected tests. Without a solution, the template tests
+   must run on their own.
 2. **Test**, once per student, in the sandbox. The student's tests
-   directory and `conftest.py` are replaced by the template's and mounted
-   read only. The pytest configuration comes from the template's
-   `pytest.ini` or `[tool.pytest.ini_options]`; the student's is ignored.
-   Nothing from the student is installed: the project directory (and `src/`,
-   when it exists) goes in `PYTHONPATH`, and the dependencies are the ones
-   in the template lock file.
-3. **Score**, in chalk. Only the collected tests count. A test missing from
+   directory, `conftest.py` and pytest configuration files (`pytest.ini`,
+   `pyproject.toml`, `tox.ini`, `setup.cfg`) are replaced by the
+   template's, or removed when the template lacks them. The tests are
+   mounted read only. Nothing from the student is installed: the project
+   directory and `src/` go in `PYTHONPATH`, and the dependencies are the
+   ones in the template lock file.
+3. **Score**, in chalk. Only the expected tests count. A test missing from
    the report, failed, errored or skipped counts as a failure. Tests the
    student adds do not count.
 
@@ -340,12 +341,13 @@ Steps:
    `.chalk/cache/`, separate from your `~/.cargo`. Then the template with
    `solution/` is built, and the result is kept as a cached target
    directory. The cache is reused until `Cargo.toml`, `Cargo.lock` or the
-   compiler change. `cargo nextest list` collects the expected tests.
+   compiler change. The build and test steps of the reference solution
+   give the expected tests.
 2. **Build**, once per student, in the sandbox and offline. The cached
    target directory is copied to the project (instantly on btrfs and xfs),
    so only the student's crate compiles.
 3. **Test**, in the sandbox and offline, with `cargo nextest run`.
-4. **Score**, as in python-pytest: only the collected tests count.
+4. **Score**, as in python-pytest: only the expected tests count.
 
 `Cargo.toml`, `Cargo.lock`, `.cargo/`, `.config/` and the test directories
 come from the template, so the student cannot add dependencies, change the
@@ -358,6 +360,70 @@ instead, and with `manual` it is left ungraded for `chalk grade`.
 
 The toolchain is the one `rustc` selects in the template directory, so a
 `rust-toolchain.toml` in the template is honored.
+
+## Custom profiles
+
+`python-pytest` and `rust-cargo` are written as data, in
+[`chalk/autograder/profiles.toml`](https://github.com/fabiommendes/chalk/blob/main/chalk/autograder/profiles.toml).
+A `[profiles.<name>]` table in `chalk.toml` adds a profile with the same
+keys, for any test runner that writes a JUnit report. Questions select it
+with `profile: <name>`.
+
+```toml
+# chalk.toml: each tests/*.sh of the template is a test of prog.sh
+[profiles.shell-tests]
+key = ["tests/inc.sh"]
+build.command = "sh -n prog.sh"   # syntax errors are build errors
+files."run.sh" = """
+echo '<testsuites><testsuite>'
+for t in tests/*.sh; do
+  n=$(basename "$t" .sh)
+  if sh "$t" >/dev/null 2>&1; then echo "<testcase classname='sh' name='$n'/>"
+  else echo "<testcase classname='sh' name='$n'><failure/></testcase>"; fi
+done
+echo '</testsuite></testsuites>'
+"""
+test.command = 'sh {cache}/run.sh > "$CHALK_RESULT"'
+```
+
+With `extends`, a profile starts from another one and changes some keys.
+Tables (`env`, `probe`, `files`, the steps) are merged key by key; other
+values are replaced. A table with the name of a built-in profile replaces
+it, and `extends` with its own name refers to the built-in one:
+
+```toml
+[profiles.python-pytest]
+extends = "python-pytest"
+env.PYTHONHASHSEED = "42"
+```
+
+| Key | Meaning |
+| --- | --- |
+| `key` | Template files the profile needs, such as lock files. Their contents select the cache. |
+| `trusted` | Files and directories the template controls. The student's copies are replaced, or removed when the template lacks them. |
+| `tests` | Default test directories or files (`["tests"]`). The `tests` option of a question overrides it. |
+| `probe` | Variables set from the output of commands run outside the sandbox, such as the path of a toolchain. |
+| `env` | Environment variables of every step. |
+| `unset` | Environment variables removed in every step. |
+| `readable` | Paths the sandbox mounts read only (default `["{cache}"]`). Needed for paths under hidden directories such as the home directory. |
+| `files` | Files written to the cache: name and content. |
+| `prepare.commands` | Commands that fill the cache, run once outside the sandbox and with the network on, in a copy of the template with the solution. |
+| `build.command` | Optional build step. A failure is a build error. `build.seed` copies cache paths to the working directory first. |
+| `test.command` | Test step. It writes a JUnit report to `$CHALK_RESULT`. |
+
+Strings can use the variables `{cache}`, `{template}`, `{workdir}`,
+`{tests}`, `{PATH}` and the probe names. Commands get them shell-quoted,
+so `{cache}/run.sh` is safe with spaces. Unknown names such as `${HOME}`
+are left for the shell.
+
+The cache directory, `.chalk/cache/<profile>-<hash>`, is selected by the
+contents of the `key` files, the probe output and the `probe`, `env`,
+`unset`, `files` and `prepare` keys. Changing any of them prepares a new
+cache. The tests and the solution are not part of it: the reference run
+happens every time chalk grades.
+
+The steps run with the environment described in [Sandbox](#sandbox):
+`$HOME` and `/tmp` are empty, and the network is off except in `prepare`.
 
 ### Checking the autograder
 

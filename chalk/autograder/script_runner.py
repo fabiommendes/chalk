@@ -88,9 +88,12 @@ class ScriptRunner:
         limits: models.Limits | None = None,
         sandbox: Sandbox | None = None,
         log_name: str = "chalk.stdout",
+        expect_result: bool = True,
     ) -> None:
         self._chalk_env = env
         self._log_name = log_name
+        #: False for steps that only report by the exit code, such as a build.
+        self._expect_result = expect_result
         self.timeout = timeout
         self.script_path = script_path
         self._repo = repo
@@ -185,8 +188,11 @@ class ScriptRunner:
         shutil.rmtree(self._result_dir, ignore_errors=True)
 
         if result is None:
-            msg = f"Process terminated without generating report file for student {self._chalk_env.student_id}"
-            log.warning(msg)
+            if self._expect_result:
+                student = self._chalk_env.student_id
+                log.warning(
+                    f"Process terminated without generating report file for student {student}"
+                )
 
             if timeout:
                 return Result(-1, score=dq.Timeout(), stdout=stdout)

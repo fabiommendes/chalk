@@ -1,0 +1,67 @@
+# Built-in autograder profiles. A [profiles.<name>] table in chalk.toml
+# with the same keys adds a profile, or changes one of these with
+# `extends = "<name>"`. The keys are documented in
+# docs/user-manual/autograding-scripts.md.
+#
+# Variables in braces: {cache}, {template}, {workdir}, {tests}, {PATH} and
+# the probes of the profile. Commands get them shell-quoted.
+
+[python-pytest]
+description = "Python project tested with pytest, dependencies from uv.lock"
+key = ["pyproject.toml", "uv.lock"]
+# Every file pytest reads its configuration from comes from the template.
+trusted = ["conftest.py", "pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"]
+readable = ["{cache}", "{python}"]
+# Plugins are not loaded automatically: the student could add a dist-info
+# with a pytest11 entry point. The template's conftest.py loads the plugins
+# it needs with `pytest_plugins`.
+env.PYTHONPATH = "{workdir}/src:{workdir}"
+env.PYTHONDONTWRITEBYTECODE = "1"
+env.PYTHONHASHSEED = "0"
+env.PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+env.UV_PROJECT_ENVIRONMENT = "{cache}/venv"
+unset = ["PYTHONHOME"]
+# Python installations of uv, hidden in the home directory.
+probe.python = "uv python dir"
+prepare.commands = ["uv sync --frozen --no-install-project"]
+test.command = """\
+{cache}/venv/bin/python -m pytest --rootdir {workdir} -p no:cacheprovider \
+--junit-xml "$CHALK_RESULT" {tests}"""
+
+[rust-cargo]
+description = "Rust crate tested with cargo nextest, dependencies from Cargo.lock"
+key = ["Cargo.toml", "Cargo.lock"]
+trusted = ["Cargo.toml", "Cargo.lock", ".cargo", ".config"]
+readable = ["{cache}", "{sysroot}", "{nextest}"]
+# The sandbox runs the toolchain binaries directly: the rustup proxies need
+# the rustup home, which is hidden. CARGO_HOME is in the cache, apart from
+# the teacher's, which holds the crates.io token.
+env.CARGO_HOME = "{cache}/home"
+env.RUSTC = "{sysroot}/bin/rustc"
+env.PATH = "{sysroot}/bin:{nextest}:{PATH}"
+env.CARGO_TERM_COLOR = "never"
+unset = ["CARGO_TARGET_DIR"]
+probe.sysroot = "rustc --print sysroot"
+probe.nextest = 'p=$(command -v cargo-nextest) && dirname "$p"'
+probe.rustc = "rustc -vV"
+files."nextest.toml" = """
+[profile.chalk]
+fail-fast = false
+
+[profile.chalk.junit]
+path = "junit.xml"
+"""
+# The target directory of the reference solution: each student starts from
+# a copy, so only the student's crate compiles.
+prepare.commands = [
+    "cargo fetch --locked",
+    "cargo build --tests --offline --locked --target-dir {cache}/target",
+]
+build.seed = { target = "{cache}/target" }
+build.command = "cargo build --tests --offline --locked"
+build.timeout = 120
+# Only integration tests (the tests/ directory) count.
+test.command = """\
+cargo nextest run --offline --locked --profile chalk \
+--config-file {cache}/nextest.toml -E 'kind(test)'; \
+cp target/nextest/chalk/junit.xml "$CHALK_RESULT\""""

@@ -297,19 +297,18 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             from ..autograder.regex_answer import RegexAnswerGrader
 
             return RegexAnswerGrader(conf)
-        if conf.profile == "python-pytest":
-            from ..autograder.pytest_profile import PytestGrader
+        if conf.profile in (None, "script"):
+            return None
+        from ..autograder.profile_grader import ProfileGrader, resolve_profile
 
-            return PytestGrader(
-                script=None, question=self, conf=conf, solution=self._profile_solution()
-            )
-        if conf.profile == "rust-cargo":
-            from ..autograder.rust_profile import CargoGrader
-
-            return CargoGrader(
-                script=None, question=self, conf=conf, solution=self._profile_solution()
-            )
-        return None
+        return ProfileGrader(
+            script=None,
+            question=self,
+            conf=conf,
+            name=conf.profile,
+            profile=resolve_profile(conf.profile, self.quiz.classroom.profiles),
+            solution=self._profile_solution(),
+        )
 
     def get_reference_answer(self) -> Answer | None:
         """

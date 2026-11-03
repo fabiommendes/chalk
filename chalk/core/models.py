@@ -66,6 +66,9 @@ class Classroom(BaseModel):
     lang: str | None = None
     autograder: Autograder | None = None
     decimal_places: Annotated[int, Field(ge=0)] = 2
+    #: Autograder profiles of the [profiles] tables, before validation:
+    #: `extends` is resolved by chalk.autograder.profile_grader.
+    profiles: dict[str, dict[str, Any]] = {}
 
     #: Column of roster.csv with the student id. By default "school_id",
     #: or "id" in rosters without a "school_id" column.
@@ -290,6 +293,116 @@ class Stage(BaseModel):
     ] = None
 
 
+class ProfileStep(Stage):
+    """
+    A step of a profile that runs in the sandbox, once per student.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: Annotated[
+        str,
+        Field(description="Shell command of the step, run in the working directory."),
+    ]
+    seed: Annotated[
+        dict[str, str],
+        Field(
+            description=(
+                "Paths of the working directory filled with a copy of a path, usually in "
+                "the cache, before the step. The student's files are touched after the copy, "
+                "so build tools that compare modification times rebuild them."
+            ),
+        ),
+    ] = {}
+
+
+class PrepareStep(BaseModel):
+    """
+    The trusted step of a profile, run once per cache with the network on.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    commands: Annotated[
+        list[str],
+        Field(description="Shell commands run in order, outside the sandbox."),
+    ] = []
+    timeout: Annotated[
+        float | None,
+        Field(description="Timeout of each command, in seconds."),
+    ] = None
+
+
+class Profile(BaseModel):
+    """
+    Grading recipe for one ecosystem, written as data: the commands of each
+    step, the environment, the files the template controls and how the
+    report is read. See docs/user-manual/autograding-scripts.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = ""
+    extends: Annotated[
+        str | None,
+        Field(description="Profile whose keys this one inherits. Tables are merged."),
+    ] = None
+    key: Annotated[
+        list[str],
+        Field(
+            description=(
+                "Template files the profile needs, such as lock files. Their contents, the "
+                "probes and the prepare options select the cache directory."
+            ),
+        ),
+    ] = []
+    trusted: Annotated[
+        list[str],
+        Field(
+            description=(
+                "Files and directories of the template that replace the student's copies, "
+                "or are removed from the student's project when the template lacks them."
+            ),
+        ),
+    ] = []
+    tests: Annotated[
+        list[str],
+        Field(description="Default test directories or files of the template."),
+    ] = ["tests"]
+    probe: Annotated[
+        dict[str, str],
+        Field(
+            description=(
+                "Variables set from the output of shell commands run outside the sandbox, "
+                "such as the path of a toolchain."
+            ),
+        ),
+    ] = {}
+    env: Annotated[
+        dict[str, str],
+        Field(description="Environment variables of every step."),
+    ] = {}
+    unset: Annotated[
+        list[str],
+        Field(description="Environment variables removed in every step."),
+    ] = []
+    readable: Annotated[
+        list[str],
+        Field(description="Paths the sandbox mounts read only, such as the cache."),
+    ] = ["{cache}"]
+    files: Annotated[
+        dict[str, str],
+        Field(description="Files written to the cache directory: name -> content."),
+    ] = {}
+    prepare: PrepareStep = Field(default_factory=PrepareStep)
+    build: ProfileStep | None = None
+    test: ProfileStep
+    report: Annotated[
+        Literal["junit"],
+        Field(description="Format of the report the test step writes to $CHALK_RESULT."),
+    ] = "junit"
+
+
 class Autograder(BaseModel):
     answer: Annotated[
         str,
@@ -347,14 +460,15 @@ class Autograder(BaseModel):
         ),
     ] = []
     profile: Annotated[
-        Literal["script", "regex", "python-pytest", "rust-cargo"] | None,
+        str | None,
         Field(
             description=(
                 "How the answer is graded. 'script' runs the autograder script; 'regex' "
                 "tests a regex answer against the examples in `match` and `reject`; "
                 "'python-pytest' runs the template tests with pytest; 'rust-cargo' builds "
-                "the crate and runs the template tests with cargo nextest. By default, "
-                "'script' when the question has a script."
+                "the crate and runs the template tests with cargo nextest. Other names refer "
+                "to the [profiles] tables of chalk.toml. By default, 'script' when the "
+                "question has a script."
             ),
         ),
     ] = None
@@ -400,23 +514,24 @@ class Autograder(BaseModel):
         ),
     ] = "full"
     tests: Annotated[
-        list[str],
+        list[str] | None,
         Field(
             description=(
-                "python-pytest and rust-cargo profiles: test directories or files of the "
-                "template. They replace the student's copies and are read only during the run."
+                "Profiles that run tests: test directories or files of the template, by "
+                "default the profile's. They replace the student's copies and are read only "
+                "during the run."
             ),
         ),
-    ] = ["tests"]
+    ] = None
     build: Annotated[
         Stage,
-        Field(description="rust-cargo profile: options of the build step."),
+        Field(description="Profiles with a build step: timeout and limits of the build."),
     ] = Field(default_factory=Stage)
     on_build_error: Annotated[
         Literal["build-error", "zero", "manual"],
         Field(
             description=(
-                "rust-cargo profile: an answer that does not compile gets the 'build-error' "
+                "Profiles with a build step: an answer that does not compile gets the 'build-error' "
                 "disqualification, a zero, or is left for manual grading. The compiler "
                 "output is the feedback."
             ),

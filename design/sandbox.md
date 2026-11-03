@@ -370,8 +370,9 @@ questions:
 - `sandbox` escolhe o backend (`bwrap`, `podman`, `none`); o padrão vem do
   perfil.
 - Sem `profile`, uma questão com `script:` usa o perfil `script`, como hoje.
-- Perfis próprios do professor ficam em `chalk.toml` (`[sandbox.<nome>]`,
-  herdando de um perfil embutido), para reaproveitar entre provas.
+- Perfis próprios do professor ficam em `chalk.toml` (`[profiles.<nome>]`,
+  com `extends` para herdar de outro perfil), para reaproveitar entre
+  provas.
 
 
 ## Fases
@@ -407,9 +408,31 @@ questions:
    direto (`rustc --print sysroot`), sem os proxies do rustup. Só testes
    de integração (`tests/`) contam. `on_build_error` aceita `build-error`
    (padrão), `zero` e `manual`.
-6. Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração serve
-   sem código novo.
-7. Perfis em `chalk.toml` e rede `services`.
+6. ~~Perfis em `chalk.toml`~~ (feito antes da fase de perfis novos, que
+   dependia disso) e rede `services` (falta). `python-pytest` e
+   `rust-cargo` viraram dados em `chalk/autograder/profiles.toml`, e um
+   único `ProfileGrader` executa qualquer perfil. Mudanças em relação ao
+   desenho:
+   - A lista de testes esperados vem do relatório JUnit de uma execução da
+     solução de referência (build e test no sandbox, como um aluno), não de
+     um comando de coleta por linguagem. Sai o parser do
+     `pytest --collect-only` e do `nextest list`. Custa uma execução extra
+     por correção e exige que a solução rode; a nota dela não importa, só
+     os nomes dos testes.
+   - O que era código virou chaves: `probe` (comandos que descobrem o
+     toolchain, como `rustc --print sysroot` e `uv python dir`), `key`
+     (arquivos que escolhem o cache), `files` (arquivos gerados no cache,
+     como a config do nextest), `build.seed` (cópia do `target/`) e
+     `unset`.
+   - O pytest não recebe mais `-c`: `pytest.ini`, `pyproject.toml`,
+     `tox.ini`, `setup.cfg` e `conftest.py` são arquivos confiáveis, vindos
+     do template ou removidos.
+   - Os testes aparecem no feedback como `classname::name` do JUnit
+     (`tests.test_calc::test_sub`), para todos os perfis.
+   - `script` e `regex` continuam em código: não seguem o modelo de etapas.
+7. Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração serve
+   sem código novo. `stdio` precisa de um leitor de relatório novo ou de um
+   executor embutido que gere JUnit.
 8. Backend `podman` com rede `internal`.
 
 

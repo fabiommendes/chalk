@@ -67,6 +67,13 @@ class Classroom:
         return self._conf.autograder or Autograder()
 
     @property
+    def profiles(self) -> dict[str, dict[str, Any]]:
+        """
+        The [profiles] tables of chalk.toml, as written.
+        """
+        return self._conf.profiles
+
+    @property
     def name(self) -> str:
         return self._conf.name
 
@@ -99,8 +106,10 @@ class Classroom:
             raise RuntimeError("Could not find the project root")
 
         with (root / "chalk.toml").open("rb") as fd:
-            data = tomllib.load(fd)["chalk"]
+            toml = tomllib.load(fd)
+            data = toml["chalk"]
             data["name"] = data.pop("classroom")
+            data["profiles"] = toml.get("profiles", {})
 
         conf = models.Classroom.model_validate(data)
 

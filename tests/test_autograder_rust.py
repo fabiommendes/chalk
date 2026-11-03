@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from chalk.autograder.profile_grader import ProfileGrader, resolve_profile
 from chalk.autograder.profiles import PrepareError
-from chalk.autograder.rust_profile import CargoGrader
 from chalk.core import disqualification as dq
 from chalk.core import models
 from tests.test_autograder_sandbox import needs_bwrap
@@ -85,7 +85,7 @@ def crate(root: Path, lib: str, files: dict[str, str] | None = None) -> Path:
     return root
 
 
-def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> CargoGrader:
+def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> ProfileGrader:
     question = SimpleNamespace(
         id="q1",
         quiz=SimpleNamespace(id="p1"),
@@ -93,10 +93,12 @@ def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> C
         get_template_path=lambda: template,
     )
     conf = {"profile": "rust-cargo", "timeout": 120, **conf}
-    return CargoGrader(
+    return ProfileGrader(
         script=None,
         question=question,  # type: ignore[arg-type]
         conf=models.Autograder(**conf),
+        name="rust-cargo",
+        profile=resolve_profile("rust-cargo"),
         solution=solution,
         cache_dir=cache,
     )
@@ -119,7 +121,7 @@ class Cases:
         )
         graded = self.grade(template, cache, solution, root)
         assert graded.score == Fraction(2, 4)
-        assert "calc::calc sub_ok" in (graded.feedback or "")
+        assert "calc::calc::sub_ok" in (graded.feedback or "")
 
     def test_build_error(self, template, cache, solution, tmp_path) -> None:
         root = crate(tmp_path / "s", "pub fn add(a: i32, b: i32) -> i32 { a + }\n")
@@ -155,7 +157,7 @@ class TestWithoutSandbox(Cases):
     def test_cache_is_reused(self, template, cache, solution) -> None:
         self.grade(template, cache, solution, solution)
         self.grade(template, cache, solution, solution)
-        assert len(list(cache.glob("cargo-*"))) == 1
+        assert len([p for p in cache.glob("rust-cargo-*") if p.is_dir()]) == 1
 
     def test_template_without_lock(self, tmp_path, cache) -> None:
         template = tmp_path / "template"

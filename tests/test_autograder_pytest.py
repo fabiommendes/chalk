@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import pytest
 import typer
 
+from chalk.autograder.profile_grader import ProfileGrader, resolve_profile
 from chalk.autograder.profiles import PrepareError, install_trusted_files, score_report
-from chalk.autograder.pytest_profile import PytestGrader, junit_key, parse_collection
 from chalk.cli.autograde_cmd import check_autograder
 from chalk.core import disqualification as dq
 from chalk.core import models
@@ -52,19 +52,8 @@ def junit(*cases: str) -> str:
 
 
 class TestScore:
-    ids = ("tests/test_a.py::test_x", "tests/test_a.py::TestK::test_y[a::b]")
-    expected = {junit_key(i): i for i in ids}
-
-    def test_junit_key(self) -> None:
-        assert junit_key("tests/test_a.py::test_x") == ("tests.test_a", "test_x")
-        assert junit_key("tests/test_a.py::TestK::test_y[a::b]") == (
-            "tests.test_a.TestK",
-            "test_y[a::b]",
-        )
-
-    def test_parse_collection(self) -> None:
-        output = "tests/a.py::test_x\ntests/a.py::test_y[1]\n\n2 tests collected in 0.01s\n"
-        assert parse_collection(output) == ("tests/a.py::test_x", "tests/a.py::test_y[1]")
+    keys = (("tests.test_a", "test_x"), ("tests.test_a.TestK", "test_y[a::b]"))
+    expected = {k: "::".join(k) for k in keys}
 
     def test_all_pass(self) -> None:
         src = junit(
@@ -154,7 +143,7 @@ def cache(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("cache")
 
 
-def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> PytestGrader:
+def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> ProfileGrader:
     question = SimpleNamespace(
         id="q1",
         quiz=SimpleNamespace(id="p1"),
@@ -162,10 +151,12 @@ def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> P
         get_template_path=lambda: template,
     )
     conf = {"profile": "python-pytest", "timeout": 60, **conf}
-    return PytestGrader(
+    return ProfileGrader(
         script=None,
         question=question,  # type: ignore[arg-type]
         conf=models.Autograder(**conf),
+        name="python-pytest",
+        profile=resolve_profile("python-pytest"),
         solution=solution,
         cache_dir=cache,
     )
@@ -207,7 +198,7 @@ class Cases:
         root = project(tmp_path, "def add(a, b): return a + b\ndef sub(a, b): return 0\n")
         graded = self.grade(template, cache, solution, root)
         assert graded.score == Fraction(2, 4)
-        assert "tests/test_calc.py::test_sub" in (graded.feedback or "")
+        assert "tests.test_calc::test_sub" in (graded.feedback or "")
 
     def test_import_error_scores_zero(self, template, cache, solution, tmp_path) -> None:
         root = project(tmp_path, "")
@@ -254,7 +245,7 @@ class Cases:
 class TestWithoutSandbox(Cases):
     def test_venv_is_cached(self, template, cache, solution) -> None:
         self.grade(template, cache, solution, solution)
-        assert len(list(cache.glob("venv-*"))) == 1
+        assert len([p for p in cache.glob("python-pytest-*") if p.is_dir()]) == 1
 
     def test_collection_fails_without_solution(self, template, cache) -> None:
         grader = make_grader(template, cache, None, sandbox="none")
