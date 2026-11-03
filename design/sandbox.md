@@ -468,7 +468,22 @@ questions:
      trabalho em vez do template, para os arquivos removidos por `hide`
      não voltarem pela montagem.
    - A mensagem de falha de cada teste do JUnit entra no feedback.
-8. Backend `podman` com rede `internal`.
+8. Backend `podman` com rede `internal`. Adiado até aparecer um caso
+   concreto. O gatilho provável é um trabalho com stack livre, que só dá
+   para testar como caixa-preta (na maioria dos casos ele seria corrigido
+   à mão). Esboço discutido:
+   - o aluno entrega um `Dockerfile`; uma falha no `podman build` dá
+     `build-error`;
+   - o contêiner do aluno roda numa rede `--internal`, com limites de
+     cgroup;
+   - os testes do professor rodam em outro contêiner na mesma rede e falam
+     com o projeto por HTTP. O relatório fica fora do alcance do aluno.
+   - Em aberto: o build precisa de rede para baixar dependências, e um
+     `RUN` executa código do aluno com internet; e se vale aceitar
+     `compose.yaml` (app mais banco escolhido pelo aluno).
+   - Limites de cgroup sem podman (`systemd-run --user --scope` em volta do
+     bwrap) podem vir antes, se fork bombs ou memória somada de vários
+     processos virarem problema.
 
 
 ## Decisões tomadas
