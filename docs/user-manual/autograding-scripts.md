@@ -2,10 +2,9 @@
 
 Chalk can grade student submissions based on a custom grading script. Chalk
 prepares each submission, set a a working directory, collect grades, and clean
-up after grading. It however **DO NOT** provide any sandbox or security
-mechanism, so it is the responsibility of the instructor to ensure that the
-grading script is safe to run. We recommend using bwrap, docker or similar tools
-to isolate the grading script if you need to execute untrusted code.
+up after grading. Scripts run in a sandbox by default (see "Sandbox" below).
+Python projects tested with pytest need no script at all (see "Python
+projects with pytest").
 
 The mechanism is kept intentionally simple and flexible, so that instructors can
 implement their own grading logic for different types of quizzes.
@@ -235,3 +234,79 @@ The score is the fraction of examples with the expected outcome, and the
 feedback lists the others. The regex runs in a separate process with a
 timeout of one second per example, so a regex with catastrophic
 backtracking only fails the examples where it hangs.
+
+
+## Python projects with pytest
+
+The `python-pytest` profile grades a Python project with the tests of the
+template, without a script. The score is the number of passed tests over
+the number of tests in the template.
+
+```
+final-exam/
+└── q1/
+    ├── template/
+    │   ├── pyproject.toml
+    │   ├── uv.lock
+    │   └── tests/
+    │       └── test_calc.py
+    └── solution/
+        └── calc.py
+```
+
+```yaml
+questions:
+  - id: q1
+    type: repo
+    autograder:
+      profile: python-pytest
+      tests: [tests]     # default; test directories or files of the template
+      timeout: 60
+```
+
+The template needs `pyproject.toml` and `uv.lock`, with pytest among the
+dependencies (usually in the `dev` group). Grading has three steps:
+
+1. **Prepare**, once per question. `uv sync --frozen` installs the template
+   dependencies in a venv under `.chalk/cache/` in the classroom. The venv
+   is reused until `pyproject.toml` or `uv.lock` change. Then pytest
+   collects the test ids from the template, together with `solution/`.
+   Without a solution, the template tests must be collectable on their own.
+2. **Test**, once per student, in the sandbox. The student's tests
+   directory and `conftest.py` are replaced by the template's and mounted
+   read only. The pytest configuration comes from the template's
+   `pytest.ini` or `[tool.pytest.ini_options]`; the student's is ignored.
+   Nothing from the student is installed: the project directory (and `src/`,
+   when it exists) goes in `PYTHONPATH`, and the dependencies are the ones
+   in the template lock file.
+3. **Score**, in chalk. Only the collected tests count. A test missing from
+   the report, failed, errored or skipped counts as a failure. Tests the
+   student adds do not count.
+
+Plugins are not loaded automatically (`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`),
+because the student could ship one. Load the plugins the tests need from the
+template's `conftest.py`:
+
+```python
+pytest_plugins = ["pytest_asyncio"]
+```
+
+A test the template always skips counts as a failure for every student;
+remove it from the template instead.
+
+The tests import the student's code in the same process, so a determined
+student can still tamper with pytest from inside it. The profile stops the
+easy tricks (editing or deleting tests, a `conftest.py`, printing a fake
+result) and keeps the output in `chalk.stdout` for review.
+
+### Checking the autograder
+
+Before grading the class, run the grader on the reference solution:
+
+```sh
+chalk autograde final-exam q1 --check
+```
+
+It grades `solution/` (or `answer_key.*` for text questions), shows the
+feedback and exits with an error unless the score is 100%. It works with
+any profile and with scripts.

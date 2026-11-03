@@ -21,12 +21,13 @@ log = getLogger(__name__)
 @dataclass(frozen=True)
 class ScriptGrader(Grader[str | Path]):
     """
-    Grades based on a regular expression.
+    Grades an answer with the autograder script of the question.
 
-    The answer is considered correct if it matches the regex.
+    The answer is copied to a working directory together with the template,
+    and the script writes the result to $CHALK_RESULT.
     """
 
-    script: Path
+    script: Path | None
     question: Question
     conf: models.Autograder
 
@@ -66,8 +67,7 @@ class ScriptGrader(Grader[str | Path]):
             data = answer
 
         with self.student_repository(id, answer, clear=not keep_files and not keep_failed) as repo:
-            runner = ScriptRunner(
-                self.script,
+            runner = self.runner(
                 repo,
                 env=ChalkEnv(
                     answer=data,
@@ -80,7 +80,6 @@ class ScriptGrader(Grader[str | Path]):
                 timeout=timeout,
                 on_output_line=on_output_line,
                 capture_output=capture_output,
-                limits=self.conf.limits,
                 sandbox=sandbox,
             )
             result = runner.run()
@@ -94,9 +93,35 @@ class ScriptGrader(Grader[str | Path]):
             feedback=result.feedback,
         )
 
+    def runner(
+        self,
+        repo: Repo,
+        /,
+        *,
+        env: ChalkEnv,
+        timeout: float,
+        on_output_line: Callable[[str], None] | None,
+        capture_output: bool,
+        sandbox: Sandbox | None,
+    ) -> ScriptRunner:
+        """
+        Runner that grades the answer prepared in the given repository.
+        """
+        assert self.script is not None
+        return ScriptRunner(
+            self.script,
+            repo,
+            env=env,
+            timeout=timeout,
+            on_output_line=on_output_line,
+            capture_output=capture_output,
+            limits=self.conf.limits,
+            sandbox=sandbox,
+        )
+
     @contextmanager
     def student_repository(
-        self, student_id: StudentId, answer: str | Path, /, clear: bool = True
+        self, student_id: StudentId, answer: str | Path | None, /, clear: bool = True
     ) -> Any:
         """
         Context manager that creates a isolated student repository within the

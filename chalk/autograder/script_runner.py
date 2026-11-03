@@ -73,11 +73,14 @@ class ScriptRunner:
 
     def __init__(
         self,
-        script_path: Path,
+        script_path: Path | None,
         repo: Repo,
         /,
         *,
         env: ChalkEnv,
+        command: str | None = None,
+        extra_env: dict[str, str | None] | None = None,
+        result_reader: Callable[[Path], Graded | None] | None = None,
         timeout: float,
         on_output_line: Callable[[str], Any] | None = None,
         capture_output: bool = True,
@@ -90,13 +93,16 @@ class ScriptRunner:
         self._repo = repo
         self._on_output_line = on_output_line or (lambda _: None)
         self._result: Result | None = None
+        self._result_reader = result_reader or extract_result_from_file
 
-        if not script_path.exists():
-            raise OSError(f"Script not found: {script_path}")
-        elif not script_path.is_file():
-            raise OSError(f"Script is not a file: {script_path}")
-        # elif not os.access(script_path, os.X_OK):
-        #     raise OSError(f"Script is not executable: {script_path}")
+        if command is None:
+            if script_path is None:
+                raise ValueError("either a script or a command is required")
+            elif not script_path.exists():
+                raise OSError(f"Script not found: {script_path}")
+            elif not script_path.is_file():
+                raise OSError(f"Script is not a file: {script_path}")
+            command = self._get_shell_command(script_path)
 
         self._master_pty_fd, self._slave_pty_fd = pty.openpty()
         self.capture_output = capture_output
@@ -107,19 +113,29 @@ class ScriptRunner:
         self.result_path = self._result_dir / "result"
 
         env = self._chalk_env.to_env_dict(repo.root, self.result_path)
-        command: str | list[str] = self._get_shell_command(script_path)
+        for key, value in (extra_env or {}).items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+
+        args: str | list[str] = command
         if sandbox is not None:
-            command = bwrap_command(
+            readable = (
+                [*sandbox.readable] if script_path is None else [script_path, *sandbox.readable]
+            )
+            args = bwrap_command(
                 command,
                 workdir=repo.root,
                 writable=[self._result_dir],
-                readable=[script_path, *sandbox.readable],
+                readable=readable,
+                overlays=sandbox.overlays,
                 network=sandbox.network,
                 env=env,
             )
 
         self.process = subprocess.Popen(
-            command,
+            args,
             shell=sandbox is None,
             cwd=repo.root,
             env=env,
@@ -275,7 +291,7 @@ class ScriptRunner:
         """
         if not self.result_path.is_file():
             return None
-        return extract_result_from_file(self.result_path)
+        return self._result_reader(self.result_path)
 
 
 @dataclass(frozen=True)
@@ -286,6 +302,8 @@ class Sandbox:
 
     network: bool = False
     readable: tuple[Path, ...] = ()
+    #: (source, target) files mounted read only over the working directory.
+    overlays: tuple[tuple[Path, Path], ...] = ()
 
 
 @dataclass

@@ -62,6 +62,7 @@ def bwrap_command(
     workdir: Path,
     writable: Iterable[Path] = (),
     readable: Iterable[Path] = (),
+    overlays: Iterable[tuple[Path, Path]] = (),
     network: bool = False,
     env: dict[str, str] | None = None,
 ) -> list[str]:
@@ -74,6 +75,8 @@ def bwrap_command(
         writable: other directories mounted read and write.
         readable: paths mounted back read only, when they are inside a hidden
             directory.
+        overlays: (source, target) pairs mounted read only after the writable
+            directories, to protect files inside the working directory.
         network: share the host network.
         env: environment of the command, used to find PATH and HOME.
     """
@@ -93,8 +96,17 @@ def bwrap_command(
         if path.exists() and _inside(path, hidden):
             args += ["--ro-bind", str(path), str(path)]
 
+    # A symlink inside a hidden directory (uv links cpython-3.13 to
+    # cpython-3.13.5) is recreated, so paths through it still work.
+    for path in _dedup(Path(os.path.abspath(p)) for p in reexposed):
+        if path.is_symlink() and _inside(path, hidden):
+            args += ["--symlink", os.readlink(path), str(path)]
+
     for path in _dedup(p.resolve() for p in [workdir, *writable]):
         args += ["--bind", str(path), str(path)]
+
+    for source, target in overlays:
+        args += ["--ro-bind", str(source.resolve()), str(target)]
 
     if network and Path("/run/systemd/resolve").is_dir():
         # /etc/resolv.conf usually links here, and /run is hidden.

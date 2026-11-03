@@ -332,12 +332,13 @@ class Autograder(BaseModel):
         ),
     ] = []
     profile: Annotated[
-        Literal["script", "regex"] | None,
+        Literal["script", "regex", "python-pytest"] | None,
         Field(
             description=(
                 "How the answer is graded. 'script' runs the autograder script; 'regex' "
-                "tests a regex answer against the examples in `match` and `reject`. By "
-                "default, 'script' when the question has a script."
+                "tests a regex answer against the examples in `match` and `reject`; "
+                "'python-pytest' runs the template tests with pytest. By default, "
+                "'script' when the question has a script."
             ),
         ),
     ] = None
@@ -382,6 +383,15 @@ class Autograder(BaseModel):
             ),
         ),
     ] = "full"
+    tests: Annotated[
+        list[str],
+        Field(
+            description=(
+                "python-pytest profile: test directories or files of the template. They "
+                "replace the student's copies and are read only during the run."
+            ),
+        ),
+    ] = ["tests"]
     command: Annotated[
         str | None,
         Field(

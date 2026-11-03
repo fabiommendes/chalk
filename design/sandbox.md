@@ -389,8 +389,12 @@ questions:
    a nota. Proteger a nota fica para os perfis da fase 4, ou para um
    `$CHALK_RUN` em que só a parte do aluno roda isolada. Limite de
    processos (cgroups) ainda falta.
-4. Perfil `python-pytest` com preparo em cache, nota pela lista coletada e
-   `chalk autograde --check`. Leitor JUnit.
+4. ~~Perfil `python-pytest` com preparo em cache, nota pela lista coletada e
+   `chalk autograde --check`.~~ Feito. A coleta usa o template mais
+   `solution/` e roda fora do sandbox (código confiável). Teste pulado
+   conta como falha, para o aluno não fugir de um teste com
+   `pytest.skip()`. Sem `--trace` por enquanto. `sandbox: none` é aceito
+   sem `--unsafe`: a declaração explícita no `conf.yaml` já basta.
 5. Etapa `build` e perfil `rust-cargo`, com cache de `target/` em overlay e
    o resultado `build-error`.
 6. Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração serve

@@ -173,6 +173,17 @@ def autograde(
             help="Only run the script and do not save grades or feedback.",
         ),
     ] = False,
+    check: Annotated[
+        bool,
+        typer.Option(
+            ...,
+            "--check",
+            help=(
+                "Grade the reference solution of the question and fail unless it gets "
+                "the full score. Nothing is saved."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """
     Run the autograder for the specified quiz and question.
@@ -189,6 +200,11 @@ def autograde(
         students = [*cls.roster.values()]
         if limit is not None and 0 < limit < len(students):
             students = students[:limit]
+
+    if check:
+        question = cls.prompt_question(quiz, question_id)
+        check_autograder(question, timeout=timeout, keep_files=keep_files)
+        return
 
     if run_script:
         question = cls.prompt_question(quiz, question_id)
@@ -224,6 +240,32 @@ def autograde(
             force_grading=force_grading,
             dry_run=dry_run,
         )
+
+
+def check_autograder(question: Question, *, timeout: float | None, keep_files: bool) -> None:
+    """
+    Grade the reference answer of the question and exit with code 1 unless it
+    gets the full score.
+    """
+    grader = question.get_grader()
+    if grader is None:
+        raise typer.BadParameter("Question does not use an autograder.", param_hint="QUESTION")
+    answer = question.get_reference_answer()
+    if answer is None:
+        msg = "Question has no reference solution (solution/ or answer_key.*)."
+        raise typer.BadParameter(msg, param_hint="QUESTION")
+
+    graded = grader("solution", answer, timeout=timeout, keep_failed=True, keep_files=keep_files)
+    if graded is None:
+        rich.print("[red]The reference solution was not graded.[/]")
+        raise typer.Exit(1)
+
+    rich.print(f"Reference solution: {graded}")
+    if graded.feedback:
+        rich.print(Panel(graded.feedback, title="Feedback", expand=False))
+    if not is_score(graded.score) or graded.score < 1:
+        rich.print("[red]The reference solution does not get the full score.[/]")
+        raise typer.Exit(1)
 
 
 #

@@ -35,13 +35,15 @@ class Repo(BaseQuestion[models.Repo, RepoAnswer]):
         return Text(f"{answer}/", style="bold green" if exists else "bold dim")
 
     def get_grader(self) -> Grader[str] | None:
-        script = self.get_autograde_script()
-        if script is None:
-            return None
+        raw_grader = self.get_profile_grader()
+        if raw_grader is None:
+            script = self.get_autograde_script()
+            if script is None:
+                return None
 
-        from ..autograder.script_grader import ScriptGrader
+            from ..autograder.script_grader import ScriptGrader
 
-        raw_grader = ScriptGrader(script=script, question=self, conf=self.get_autograder())
+            raw_grader = ScriptGrader(script=script, question=self, conf=self.get_autograder())
 
         def repo_grader(
             id: StudentId,
@@ -53,6 +55,16 @@ class Repo(BaseQuestion[models.Repo, RepoAnswer]):
             return raw_grader(id, path, **kwargs)
 
         return repo_grader
+
+    def get_reference_answer(self) -> RepoAnswer | None:
+        """
+        The `solution/` directory of the question, if it exists.
+        """
+        return "solution" if (self.root / "solution").is_dir() else None
+
+    def _profile_solution(self) -> Path | None:
+        answer = self.get_reference_answer()
+        return None if answer is None else self.root / answer
 
     def validate_answer(self, data: Any) -> RepoAnswer:
         answer = validate_type(data, str)

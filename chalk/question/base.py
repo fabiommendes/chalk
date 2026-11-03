@@ -297,7 +297,27 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             from ..autograder.regex_answer import RegexAnswerGrader
 
             return RegexAnswerGrader(conf)
+        if conf.profile == "python-pytest":
+            from ..autograder.pytest_profile import PytestGrader
+
+            return PytestGrader(
+                script=None, question=self, conf=conf, solution=self._profile_solution()
+            )
         return None
+
+    def get_reference_answer(self) -> Answer | None:
+        """
+        The teacher's reference answer, in the form the grader accepts, or
+        None. `chalk autograde --check` expects it to get the full score.
+        """
+        return self.get_answer_key()
+
+    def _profile_solution(self) -> Any:
+        """
+        Reference solution given to profile graders: the text of the answer,
+        or a directory for repository questions.
+        """
+        return self.get_reference_answer()
 
     def get_grader(self) -> Grader[Answer] | None:
         """

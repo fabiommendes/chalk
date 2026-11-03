@@ -70,6 +70,26 @@ class TestCommand:
         i = args.index(str(bin_dir))
         assert args[i - 1] == "--ro-bind"
 
+    def test_recreates_symlink_inside_home(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk.autograder.sandbox.HIDDEN", (str(tmp_path),))
+        (tmp_path / "python-3.13.5").mkdir()
+        (tmp_path / "python-3.13").symlink_to("python-3.13.5")
+        args = bwrap_command(
+            "true", workdir=Path("/w"), readable=[tmp_path / "python-3.13"], env={}
+        )
+        i = args.index("--symlink")
+        assert args[i + 1 : i + 3] == ["python-3.13.5", str(tmp_path / "python-3.13")]
+        assert args[args.index(str(tmp_path / "python-3.13.5")) - 1] == "--ro-bind"
+
+    def test_overlays_come_after_workdir(self, monkeypatch) -> None:
+        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
+        args = bwrap_command(
+            "true", workdir=Path("/w"), overlays=[(Path("/t/tests"), Path("/w/tests"))], env={}
+        )
+        assert args.index("/w/tests") > args.index("--bind")
+        assert args[args.index("/w/tests") - 2] == "--ro-bind"
+
     def test_network(self, monkeypatch) -> None:
         monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
         args = bwrap_command("true", workdir=Path("/tmp/w"), network=True, env={})
