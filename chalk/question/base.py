@@ -303,6 +303,12 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             return PytestGrader(
                 script=None, question=self, conf=conf, solution=self._profile_solution()
             )
+        if conf.profile == "rust-cargo":
+            from ..autograder.rust_profile import CargoGrader
+
+            return CargoGrader(
+                script=None, question=self, conf=conf, solution=self._profile_solution()
+            )
         return None
 
     def get_reference_answer(self) -> Answer | None:

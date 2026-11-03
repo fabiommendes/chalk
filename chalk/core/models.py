@@ -275,6 +275,21 @@ class Limits(BaseModel):
     ] = ByteSize(1024 * 1024)
 
 
+class Stage(BaseModel):
+    """
+    Options of one step of a profile, overriding the autograder's.
+    """
+
+    timeout: Annotated[
+        float | None,
+        Field(description="Timeout of the step, in seconds."),
+    ] = None
+    limits: Annotated[
+        Limits | None,
+        Field(description="Resource limits of the step."),
+    ] = None
+
+
 class Autograder(BaseModel):
     answer: Annotated[
         str,
@@ -332,12 +347,13 @@ class Autograder(BaseModel):
         ),
     ] = []
     profile: Annotated[
-        Literal["script", "regex", "python-pytest"] | None,
+        Literal["script", "regex", "python-pytest", "rust-cargo"] | None,
         Field(
             description=(
                 "How the answer is graded. 'script' runs the autograder script; 'regex' "
                 "tests a regex answer against the examples in `match` and `reject`; "
-                "'python-pytest' runs the template tests with pytest. By default, "
+                "'python-pytest' runs the template tests with pytest; 'rust-cargo' builds "
+                "the crate and runs the template tests with cargo nextest. By default, "
                 "'script' when the question has a script."
             ),
         ),
@@ -387,11 +403,25 @@ class Autograder(BaseModel):
         list[str],
         Field(
             description=(
-                "python-pytest profile: test directories or files of the template. They "
-                "replace the student's copies and are read only during the run."
+                "python-pytest and rust-cargo profiles: test directories or files of the "
+                "template. They replace the student's copies and are read only during the run."
             ),
         ),
     ] = ["tests"]
+    build: Annotated[
+        Stage,
+        Field(description="rust-cargo profile: options of the build step."),
+    ] = Field(default_factory=Stage)
+    on_build_error: Annotated[
+        Literal["build-error", "zero", "manual"],
+        Field(
+            description=(
+                "rust-cargo profile: an answer that does not compile gets the 'build-error' "
+                "disqualification, a zero, or is left for manual grading. The compiler "
+                "output is the feedback."
+            ),
+        ),
+    ] = "build-error"
     command: Annotated[
         str | None,
         Field(

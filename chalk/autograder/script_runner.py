@@ -57,7 +57,8 @@ ANSI_REGEX = re.compile(r"(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
 @dataclass
 class Result:
     return_code: int
-    score: Score | Disqualification
+    #: None when the answer goes to manual grading.
+    score: Score | Disqualification | None
     feedback: str | None = None
     stdout: str | None = None
 
@@ -86,8 +87,10 @@ class ScriptRunner:
         capture_output: bool = True,
         limits: models.Limits | None = None,
         sandbox: Sandbox | None = None,
+        log_name: str = "chalk.stdout",
     ) -> None:
         self._chalk_env = env
+        self._log_name = log_name
         self.timeout = timeout
         self.script_path = script_path
         self._repo = repo
@@ -172,7 +175,7 @@ class ScriptRunner:
             timeout = self._run_no_capture()
             stdout = ""
         self._kill_group()
-        self._repo.write_file("chalk.stdout", stdout)
+        self._repo.write_file(self._log_name, stdout)
 
         # The script may hang (timeout=True), and even so it may generate a valid report file.
         # We test this here and only create a timeout score if the report file is not generated.
@@ -189,7 +192,7 @@ class ScriptRunner:
                 return Result(-1, score=dq.Timeout(), stdout=stdout)
 
             return Result(
-                return_code=-1,
+                return_code=self.process.returncode,
                 score=dq.Error(),
                 feedback="The autograder script failed to generate a report file.",
                 stdout=stdout,
@@ -205,19 +208,34 @@ class ScriptRunner:
     def _run_to_stdout(self) -> tuple[bool, str]:
         deadline = (self.timeout or float("inf")) + time.time()
         process = self.process
+        fd = self._master_pty_fd
 
         timeout = False
         dt = 0.025
-        output_lines = []
+        output_lines: list[str] = []
         buf = b""
-        os.set_blocking(self._master_pty_fd, False)
+        os.set_blocking(fd, False)
 
-        def consume_buf():
+        def emit(line: bytes) -> None:
+            text = line.removesuffix(b"\r").decode(errors="replace")
+            self._on_output_line(text)
+            output_lines.append(text)
+
+        def feed(chunk: bytes) -> None:
             nonlocal buf
-            line = buf.removesuffix(b"\r").decode(errors="replace")
-            self._on_output_line(line)
-            output_lines.append(line)
-            buf = b""
+            *lines, buf = (buf + chunk).split(b"\n")
+            for line in lines:
+                emit(line)
+
+        def read() -> bytes | None:
+            """Available output, b"" at the end, None if nothing yet."""
+            try:
+                return os.read(fd, 65536)
+            except BlockingIOError:
+                return None
+            except OSError:
+                # EIO: every process holding the pty slave has exited.
+                return b""
 
         while process.poll() is None:
             if time.time() > deadline:
@@ -226,23 +244,21 @@ class ScriptRunner:
                 self._kill_group()
                 process.wait()
                 break
-
-            try:
-                char = os.read(self._master_pty_fd, 1)
-            except BlockingIOError:
-                time.sleep(dt)
-                continue
-
-            if char == b"\n":
-                consume_buf()
+            chunk = read()
+            if chunk:
+                feed(chunk)
             else:
-                buf += char
+                time.sleep(dt)
+
+        # The process may exit with output still in the pty buffer.
+        while chunk := read():
+            feed(chunk)
 
         buf = buf.rstrip(b"\r\n")
         if buf:
-            consume_buf()
+            emit(buf)
 
-        os.close(self._master_pty_fd)
+        os.close(fd)
         os.close(self._slave_pty_fd)
         stdout = remove_ansi_codes("\n".join(output_lines))
 

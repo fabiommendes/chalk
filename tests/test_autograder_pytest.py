@@ -8,14 +8,8 @@ from types import SimpleNamespace
 import pytest
 import typer
 
-from chalk.autograder.pytest_profile import (
-    PrepareError,
-    PytestGrader,
-    install_trusted_files,
-    junit_key,
-    parse_collection,
-    score_report,
-)
+from chalk.autograder.profiles import PrepareError, install_trusted_files, score_report
+from chalk.autograder.pytest_profile import PytestGrader, junit_key, parse_collection
 from chalk.cli.autograde_cmd import check_autograder
 from chalk.core import disqualification as dq
 from chalk.core import models
@@ -58,7 +52,8 @@ def junit(*cases: str) -> str:
 
 
 class TestScore:
-    expected = ("tests/test_a.py::test_x", "tests/test_a.py::TestK::test_y[a::b]")
+    ids = ("tests/test_a.py::test_x", "tests/test_a.py::TestK::test_y[a::b]")
+    expected = {junit_key(i): i for i in ids}
 
     def test_junit_key(self) -> None:
         assert junit_key("tests/test_a.py::test_x") == ("tests.test_a", "test_x")
@@ -130,7 +125,7 @@ class TestTrustedFiles:
         (root / "tests" / "test_fake.py").write_text("fake")
         (root / "conftest.py").write_text("evil")
 
-        overlays = install_trusted_files(root, template, ["tests"])
+        overlays = install_trusted_files(root, template, ["tests", "conftest.py"])
         assert sorted(p.name for p in (root / "tests").iterdir()) == ["test_a.py"]
         assert (root / "tests" / "test_a.py").read_text() == "ok"
         assert not (root / "conftest.py").exists()

@@ -21,6 +21,7 @@ __all__ = [
     "Timeout",
     "InvalidInput",
     "Error",
+    "BuildError",
     "parse",
     "merge",
 ]
@@ -47,6 +48,13 @@ def Error() -> Disqualification:
     return Simple.ERROR
 
 
+def BuildError() -> Disqualification:
+    """
+    Indicates that the response does not compile, so its tests could not run.
+    """
+    return Simple.BUILD_ERROR
+
+
 class Simple(Enum):
     """
     An enumeration of reasons why a response might be disqualified.
@@ -55,6 +63,7 @@ class Simple(Enum):
     TIMEOUT = "The response took too long to execute."
     INVALID_INPUT = "The response contains text with an invalid syntax."
     ERROR = "Internal error during grading."
+    BUILD_ERROR = "The response does not compile."
 
     def message(self) -> str:
         return self.value
@@ -175,8 +184,12 @@ def read(src: str) -> Parsed[Disqualification]:
     if src.startswith("timeout"):
         return Parsed(src.removeprefix("timeout"), Timeout())
 
-    if src.startswith("invalid input"):
-        return Parsed(src.removeprefix("invalid input"), InvalidInput())
+    for prefix in ("invalid-input", "invalid input"):
+        if src.startswith(prefix):
+            return Parsed(src.removeprefix(prefix), InvalidInput())
+
+    if src.startswith("build-error"):
+        return Parsed(src.removeprefix("build-error"), BuildError())
 
     if src.startswith("error"):
         return Parsed(src.removeprefix("error"), Error())

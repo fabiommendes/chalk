@@ -25,21 +25,18 @@ import re
 import shlex
 import shutil
 import subprocess
-import xml.etree.ElementTree as ET
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from fractions import Fraction
 from logging import getLogger
 from pathlib import Path
 
-from ..core import disqualification as dq
-from ..core.grader import DEFAULT_TIMEOUT, Graded
+from ..core.grader import DEFAULT_TIMEOUT
+from .profiles import PrepareError, TestKey, install_trusted_files, read_report
 from .repo import Repo
-from .result_extractor import MAX_RESULT_SIZE
 from .script_grader import ScriptGrader
-from .script_runner import PASS_ENV, ChalkEnv, Sandbox, ScriptRunner
+from .script_runner import PASS_ENV, ChalkEnv, Result, Sandbox, ScriptRunner
 
-__all__ = ["PytestGrader", "junit_key", "prepare_venv", "score_report"]
+__all__ = ["PytestGrader", "junit_key", "prepare_venv"]
 
 log = getLogger(__name__)
 
@@ -51,18 +48,12 @@ TRUSTED_FILES = ("conftest.py",)
 EMPTY_CONFIG = "pytest-empty.ini"
 
 
-class PrepareError(RuntimeError):
-    """
-    The template cannot be prepared: missing lock file, failed dependency
-    install or failed test collection.
-    """
-
-
 @dataclass(frozen=True)
 class Prepared:
     venv: Path
     config: Path
-    tests: tuple[str, ...]
+    #: Expected tests: JUnit key -> test id.
+    tests: dict[TestKey, str]
 
 
 @dataclass(frozen=True)
@@ -95,7 +86,7 @@ class PytestGrader(ScriptGrader):
         self._prepared.append(Prepared(venv, config, tests))
         return self._prepared[0]
 
-    def runner(
+    def run_in(
         self,
         repo: Repo,
         /,
@@ -105,11 +96,11 @@ class PytestGrader(ScriptGrader):
         on_output_line: Callable[[str], None] | None,
         capture_output: bool,
         sandbox: Sandbox | None,
-    ) -> ScriptRunner:
+    ) -> Result:
         prepared = self.prepare()
         template = self.question.get_template_path()
         assert template is not None
-        overlays = install_trusted_files(repo.root, template, self.conf.tests)
+        overlays = install_trusted_files(repo.root, template, [*self.conf.tests, *TRUSTED_FILES])
 
         if sandbox is not None:
             sandbox = replace(
@@ -137,7 +128,7 @@ class PytestGrader(ScriptGrader):
             capture_output=capture_output,
             limits=self.conf.limits,
             sandbox=sandbox,
-        )
+        ).run()
 
     def _pytest_command(self, prepared: Prepared, root: Path, *args: str) -> str:
         python = prepared.venv / "bin" / "python"
@@ -156,13 +147,13 @@ class PytestGrader(ScriptGrader):
         ]
         return " ".join(map(shlex.quote, parts))
 
-    def _collect(self, venv: Path, config: Path, template: Path) -> tuple[str, ...]:
+    def _collect(self, venv: Path, config: Path, template: Path) -> dict[TestKey, str]:
         """
         Ids of the template tests, collected with the reference solution.
         """
-        prepared = Prepared(venv, config, ())
+        prepared = Prepared(venv, config, {})
         with self.student_repository("chalk-collect", self.solution) as repo:
-            install_trusted_files(repo.root, template, self.conf.tests)
+            install_trusted_files(repo.root, template, [*self.conf.tests, *TRUSTED_FILES])
             command = self._pytest_command(prepared, repo.root, "--collect-only", "-q")
             env = {k: os.environ[k] for k in PASS_ENV if k in os.environ}
             env.update({k: v for k, v in pytest_env(repo.root).items() if v is not None})
@@ -187,7 +178,7 @@ class PytestGrader(ScriptGrader):
             )
             msg = f"collecting the template tests failed{hint}:\n{proc.stdout}{proc.stderr}"
             raise PrepareError(msg.rstrip())
-        return tests
+        return {junit_key(t): t for t in tests}
 
     def _config(self, template: Path, cache: Path) -> Path:
         """
@@ -286,36 +277,6 @@ def pytest_env(root: Path) -> dict[str, str | None]:
     }
 
 
-def install_trusted_files(
-    root: Path, template: Path, tests: Iterable[str]
-) -> list[tuple[Path, Path]]:
-    """
-    Replace the tests and conftest.py of the project in root by the
-    template's, and return the (source, target) pairs to mount read only
-    over the working directory.
-    """
-    overlays: list[tuple[Path, Path]] = []
-    for name in [*tests, *TRUSTED_FILES]:
-        if name.startswith("-") or Path(name).is_absolute() or ".." in Path(name).parts:
-            raise ValueError(f"test path must be relative to the template: {name}")
-        source = template / name
-        target = root / name
-        if target.is_dir() and not target.is_symlink():
-            shutil.rmtree(target)
-        elif target.exists() or target.is_symlink():
-            target.unlink()
-
-        if source.is_dir():
-            shutil.copytree(source, target, symlinks=False)
-        elif source.is_file():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, target)
-        else:
-            continue
-        overlays.append((source, target))
-    return overlays
-
-
 def parse_collection(output: str) -> tuple[str, ...]:
     """
     Test ids from the output of `pytest --collect-only -q`.
@@ -341,48 +302,3 @@ def junit_key(nodeid: str) -> tuple[str, str]:
     names[0] = re.sub(r"\.py$", "", names[0])
     names[-1] += bracket + params
     return ".".join(names[:-1]), names[-1]
-
-
-def read_report(path: Path, expected: tuple[str, ...]) -> Graded:
-    if path.stat().st_size > MAX_RESULT_SIZE:
-        return Graded(dq.Error(), feedback="Test report is too large.")
-    return score_report(path.read_text(errors="replace"), expected)
-
-
-def score_report(src: str, expected: tuple[str, ...]) -> Graded:
-    """
-    Score a JUnit report against the expected test ids.
-
-    A test passes when it is in the report without failure, error or skip.
-    Missing tests, tests skipped by the student's code and repeated entries
-    with a failure count as failures. Tests not in the expected list are
-    ignored.
-    """
-    try:
-        root = ET.fromstring(src)
-    except ET.ParseError as e:
-        return Graded(dq.Error(), feedback=f"Invalid JUnit report: {e}")
-
-    outcomes: dict[tuple[str, str], bool] = {}
-    errors: list[str] = []
-    for case in root.iter("testcase"):
-        key = (case.get("classname") or "", case.get("name") or "")
-        ok = all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
-        outcomes[key] = outcomes.get(key, True) and ok
-        if not key[0] and (error := case.find("error")) is not None:
-            errors.append(f"- {key[1]}: {error.get('message') or 'error'}")
-
-    keys = {junit_key(n): n for n in expected}
-    unknown = [k for k in outcomes if k not in keys and k[0]]
-    if unknown:
-        log.warning(f"Report has {len(unknown)} tests that are not in the template: {unknown[:5]}")
-
-    failed = [n for k, n in keys.items() if outcomes.get(k) is not True]
-    passed = len(keys) - len(failed)
-    lines: list[str] = []
-    if failed:
-        lines += ["Failed tests:"]
-        lines += [f"- {n}" + ("" if junit_key(n) in outcomes else " (not run)") for n in failed]
-    if errors:
-        lines += ["Errors:", *errors]
-    return Graded(Fraction(passed, len(keys)), feedback="\n".join(lines) or None)

@@ -11,7 +11,7 @@ from ..core import disqualification as dq
 from ..core.grader import DEFAULT_TIMEOUT, Graded, Grader
 from .repo import Repo
 from .sandbox import check_bwrap
-from .script_runner import ChalkEnv, Sandbox, ScriptRunner
+from .script_runner import ChalkEnv, Result, Sandbox, ScriptRunner
 
 NOT_GIVEN: Any = object()
 
@@ -67,7 +67,7 @@ class ScriptGrader(Grader[str | Path]):
             data = answer
 
         with self.student_repository(id, answer, clear=not keep_files and not keep_failed) as repo:
-            runner = self.runner(
+            result = self.run_in(
                 repo,
                 env=ChalkEnv(
                     answer=data,
@@ -82,18 +82,19 @@ class ScriptGrader(Grader[str | Path]):
                 capture_output=capture_output,
                 sandbox=sandbox,
             )
-            result = runner.run()
 
         if result.return_code != 0 and debug:
             msg = f"[red]Autograder process  for student {id} with code {result.return_code}[/red]"
             log.warning(msg)
 
+        if result.score is None:
+            return None
         return Graded(
             result.score,
             feedback=result.feedback,
         )
 
-    def runner(
+    def run_in(
         self,
         repo: Repo,
         /,
@@ -103,9 +104,9 @@ class ScriptGrader(Grader[str | Path]):
         on_output_line: Callable[[str], None] | None,
         capture_output: bool,
         sandbox: Sandbox | None,
-    ) -> ScriptRunner:
+    ) -> Result:
         """
-        Runner that grades the answer prepared in the given repository.
+        Grade the answer prepared in the given repository.
         """
         assert self.script is not None
         return ScriptRunner(
@@ -117,7 +118,7 @@ class ScriptGrader(Grader[str | Path]):
             capture_output=capture_output,
             limits=self.conf.limits,
             sandbox=sandbox,
-        )
+        ).run()
 
     @contextmanager
     def student_repository(

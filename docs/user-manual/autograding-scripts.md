@@ -299,6 +299,66 @@ student can still tamper with pytest from inside it. The profile stops the
 easy tricks (editing or deleting tests, a `conftest.py`, printing a fake
 result) and keeps the output in `chalk.stdout` for review.
 
+## Rust crates with cargo
+
+The `rust-cargo` profile builds the student's crate and runs the
+integration tests of the template (`tests/*.rs`) with
+[cargo-nextest](https://nexte.st). Install it with
+`cargo install cargo-nextest --locked`.
+
+```
+final-exam/
+└── q2/
+    ├── template/
+    │   ├── Cargo.toml
+    │   ├── Cargo.lock
+    │   └── tests/
+    │       └── calc.rs
+    └── solution/
+        └── src/
+            └── lib.rs
+```
+
+```yaml
+questions:
+  - id: q2
+    type: repo
+    autograder:
+      profile: rust-cargo
+      timeout: 60              # test step
+      build:
+        timeout: 180           # build step, default 120
+        limits:
+          memory: 4GB
+      on_build_error: manual   # build-error (default) | zero | manual
+```
+
+Steps:
+
+1. **Prepare**, once per question. `cargo fetch --locked` downloads the
+   dependencies of the template lock file to a cache under
+   `.chalk/cache/`, separate from your `~/.cargo`. Then the template with
+   `solution/` is built, and the result is kept as a cached target
+   directory. The cache is reused until `Cargo.toml`, `Cargo.lock` or the
+   compiler change. `cargo nextest list` collects the expected tests.
+2. **Build**, once per student, in the sandbox and offline. The cached
+   target directory is copied to the project (instantly on btrfs and xfs),
+   so only the student's crate compiles.
+3. **Test**, in the sandbox and offline, with `cargo nextest run`.
+4. **Score**, as in python-pytest: only the collected tests count.
+
+`Cargo.toml`, `Cargo.lock`, `.cargo/`, `.config/` and the test directories
+come from the template, so the student cannot add dependencies, change the
+build configuration or replace the test runner. A `build.rs` of the student
+runs, but inside the sandbox. Unit tests inside `src/` do not count.
+
+An answer that does not compile gets the `build-error` result, with the
+compiler output as feedback. With `on_build_error: zero` it gets a zero
+instead, and with `manual` it is left ungraded for `chalk grade`.
+
+The toolchain is the one `rustc` selects in the template directory, so a
+`rust-toolchain.toml` in the template is honored.
+
 ### Checking the autograder
 
 Before grading the class, run the grader on the reference solution:

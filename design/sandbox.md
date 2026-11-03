@@ -395,8 +395,18 @@ questions:
    conta como falha, para o aluno não fugir de um teste com
    `pytest.skip()`. Sem `--trace` por enquanto. `sandbox: none` é aceito
    sem `--unsafe`: a declaração explícita no `conf.yaml` já basta.
-5. Etapa `build` e perfil `rust-cargo`, com cache de `target/` em overlay e
-   o resultado `build-error`.
+5. ~~Etapa `build` e perfil `rust-cargo`, com cache de `target/` em overlay e
+   o resultado `build-error`.~~ Feito, com duas mudanças. O cache de
+   `target/` é copiado (`cp -a --reflink=auto`) em vez de montado em
+   overlay: o kernel da máquina de desenvolvimento não tinha overlayfs, e
+   a cópia funciona em qualquer lugar (instantânea em btrfs). Os arquivos
+   do aluno recebem mtime atual depois da cópia, porque o cargo decide o
+   que recompilar pelo mtime e o cache pode ser mais novo que eles.
+   `CARGO_HOME` fica no cache, separado do `~/.cargo` do professor (que
+   guarda o token do crates.io). O sandbox chama os binários do toolchain
+   direto (`rustc --print sysroot`), sem os proxies do rustup. Só testes
+   de integração (`tests/`) contam. `on_build_error` aceita `build-error`
+   (padrão), `zero` e `manual`.
 6. Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração serve
    sem código novo.
 7. Perfis em `chalk.toml` e rede `services`.
