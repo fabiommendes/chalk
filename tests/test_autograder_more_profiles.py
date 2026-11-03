@@ -309,7 +309,9 @@ def test_elm(elm_template, tmp_path, sandbox, tmp_path_factory) -> None:
     try:
         g.prepare()
     except PrepareError as e:
-        if "package.elm-lang.org" in str(e):
+        # Packages come from package.elm-lang.org and GitHub; elm does not
+        # retry, so a DNS hiccup fails the download.
+        if any(m in str(e) for m in ("package.elm-lang.org", "PROBLEM DOWNLOADING")):
             pytest.skip(f"cannot download the elm packages: {e}")
         raise
     assert g("s1", solution).score == 1
