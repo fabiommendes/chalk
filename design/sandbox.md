@@ -430,9 +430,33 @@ questions:
    - Os testes aparecem no feedback como `classname::name` do JUnit
      (`tests.test_calc::test_sub`), para todos os perfis.
    - `script` e `regex` continuam em código: não seguem o modelo de etapas.
-7. Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração serve
-   sem código novo. `stdio` precisa de um leitor de relatório novo ou de um
-   executor embutido que gere JUnit.
+7. ~~Perfis `c-make`, `stdio` e `elm-test`, para validar que a abstração
+   serve sem código novo.~~ Feito, também `c-stdio`. Os três couberam em
+   TOML; o código novo foi de apoio, não por linguagem:
+   - `c-make` usa `chalk_test.h`, uma biblioteca de testes em C que o chalk
+     distribui (`{runners}` no include path): um processo por teste
+     (crash e laço infinito derrubam só o teste), relatório JUnit direto
+     em `$CHALK_RESULT`. Compila com ASan e UBSan; vazamento não é checado
+     porque o LSan precisa de ptrace. Sem Criterion ou Unity, que não geram
+     JUnit sem ferramentas extras.
+   - `stdio` ganhou um executor em Python (`runners/stdio.py`, só stdlib,
+     `python -I`) e um formato de relatório próprio (`report = "stdio"`).
+     O desenho original, um executor que compara e gera JUnit, deixava os
+     `.out` visíveis no sandbox: o programa do aluno acharia o `.in` igual
+     à sua entrada e imprimiria o `.out`. Agora a chave `hide` tira os
+     `.out` da área de trabalho, o executor só grava as saídas e o chalk
+     compara fora do sandbox, com o modo da variável `compare`.
+   - `elm-test`: o elm grava um lock no `ELM_HOME` até para ler, então o
+     cache de pacotes não pode ser montado só leitura; cada execução recebe
+     uma cópia (`build.seed`, 2-3 MB). `elm-test make` é a etapa de build.
+     `node`, `elm` e `elm-test` são achados por probe e montados só
+     leitura (o fnm deixa tudo em `~/.local/share/fnm`).
+   - Chaves novas: `vars` (com `vars` por questão no `conf.yaml`, para
+     `run`, `compare`, `test_timeout`, `binary`), `hide` e `report`.
+   - As montagens só leitura dos testes passaram a usar a cópia na área de
+     trabalho em vez do template, para os arquivos removidos por `hide`
+     não voltarem pela montagem.
+   - A mensagem de falha de cada teste do JUnit entra no feedback.
 8. Backend `podman` com rede `internal`.
 
 

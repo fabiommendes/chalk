@@ -390,6 +390,19 @@ class Profile(BaseModel):
         list[str],
         Field(description="Paths the sandbox mounts read only, such as the cache."),
     ] = ["{cache}"]
+    hide: Annotated[
+        list[str],
+        Field(
+            description=(
+                "Glob patterns of files removed from the working directory before the "
+                "build and test steps, such as the expected outputs of the stdio profile."
+            ),
+        ),
+    ] = []
+    vars: Annotated[
+        dict[str, str],
+        Field(description="Variables for the other keys. Questions override them with `vars`."),
+    ] = {}
     files: Annotated[
         dict[str, str],
         Field(description="Files written to the cache directory: name -> content."),
@@ -398,8 +411,14 @@ class Profile(BaseModel):
     build: ProfileStep | None = None
     test: ProfileStep
     report: Annotated[
-        Literal["junit"],
-        Field(description="Format of the report the test step writes to $CHALK_RESULT."),
+        Literal["junit", "stdio"],
+        Field(
+            description=(
+                "Format of the report the test step writes to $CHALK_RESULT: 'junit', or "
+                "'stdio' for the outputs of chalk's stdio runner, compared by chalk with the "
+                "template's .out files according to the `compare` variable."
+            ),
+        ),
     ] = "junit"
 
 
@@ -523,6 +542,10 @@ class Autograder(BaseModel):
             ),
         ),
     ] = None
+    vars: Annotated[
+        dict[str, str],
+        Field(description="Profiles: values of the profile variables, such as `run` in stdio."),
+    ] = {}
     build: Annotated[
         Stage,
         Field(description="Profiles with a build step: timeout and limits of the build."),

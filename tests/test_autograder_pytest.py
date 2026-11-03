@@ -118,7 +118,7 @@ class TestTrustedFiles:
         assert sorted(p.name for p in (root / "tests").iterdir()) == ["test_a.py"]
         assert (root / "tests" / "test_a.py").read_text() == "ok"
         assert not (root / "conftest.py").exists()
-        assert overlays == [(template / "tests", root / "tests")]
+        assert overlays == [(root / "tests", root / "tests")]
 
     @pytest.mark.parametrize("name", ["../x", "/etc", "-p"])
     def test_rejects_paths_outside_the_template(self, tmp_path: Path, name: str) -> None:

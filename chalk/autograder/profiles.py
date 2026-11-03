@@ -5,6 +5,7 @@ JUnit report against the tests collected in the prepare step.
 
 from __future__ import annotations
 
+import json
 import shutil
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Mapping
@@ -21,10 +22,15 @@ __all__ = [
     "check_relative",
     "install_trusted_files",
     "read_report",
+    "read_stdio_report",
     "score_report",
+    "stdio_keys",
 ]
 
 log = getLogger(__name__)
+
+#: Longest failure message of a test shown in the feedback.
+MAX_MESSAGE = 200
 
 #: Test key in a JUnit report: (classname, name).
 type TestKey = tuple[str, str]
@@ -54,7 +60,8 @@ def install_trusted_files(
     template's, or remove them when the template does not have them.
 
     Return the (source, target) pairs to mount read only over the working
-    directory.
+    directory: the copies themselves, so files removed from them later stay
+    removed.
     """
     overlays: list[tuple[Path, Path]] = []
     for name in names:
@@ -73,7 +80,7 @@ def install_trusted_files(
             shutil.copyfile(source, target)
         else:
             continue
-        overlays.append((source, target))
+        overlays.append((target, target))
     return overlays
 
 
@@ -99,11 +106,16 @@ def score_report(src: str, expected: Mapping[TestKey, str]) -> Graded:
         return Graded(dq.Error(), feedback=f"Invalid JUnit report: {e}")
 
     outcomes: dict[TestKey, bool] = {}
+    messages: dict[TestKey, str] = {}
     errors: list[str] = []
     for case in root.iter("testcase"):
         key = (case.get("classname") or "", case.get("name") or "")
-        ok = all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
-        outcomes[key] = outcomes.get(key, True) and ok
+        problems = [
+            p for tag in ("failure", "error", "skipped") if (p := case.find(tag)) is not None
+        ]
+        outcomes[key] = outcomes.get(key, True) and not problems
+        if problems and key not in messages:
+            messages[key] = _message(problems[0])
         if not key[0] and (error := case.find("error")) is not None:
             errors.append(f"- {key[1]}: {error.get('message') or 'error'}")
 
@@ -111,12 +123,72 @@ def score_report(src: str, expected: Mapping[TestKey, str]) -> Graded:
     if unknown:
         log.warning(f"Report has {len(unknown)} tests that are not in the template: {unknown[:5]}")
 
-    failed = [(k, n) for k, n in expected.items() if outcomes.get(k) is not True]
-    passed = len(expected) - len(failed)
+    failures = {k: messages.get(k, "") if k in outcomes else "(not run)" for k in expected}
+    return _graded(
+        expected, {k: m for k, m in failures.items() if outcomes.get(k) is not True}, errors
+    )
+
+
+def read_stdio_report(
+    path: Path, expected: Mapping[TestKey, str], template: Path, mode: str
+) -> Graded:
+    """
+    Score the report of chalk's stdio runner: each case passes when it ran
+    without error and its output matches the template's `.out` file.
+    """
+    from .runners.stdio import compare
+
+    if path.stat().st_size > MAX_RESULT_SIZE:
+        return Graded(dq.Error(), feedback="Test report is too large.")
+    try:
+        cases = {c["name"]: c for c in json.loads(path.read_text(errors="replace"))["cases"]}
+    except (ValueError, KeyError, TypeError) as e:
+        return Graded(dq.Error(), feedback=f"Invalid stdio report: {e}")
+
+    failures: dict[TestKey, str] = {}
+    for key in expected:
+        case = cases.get(key[1])
+        if not isinstance(case, dict):
+            failures[key] = "(not run)"
+        elif case.get("error"):
+            failures[key] = str(case["error"])
+        else:
+            want = (template / f"{key[1]}.out").read_text(errors="replace")
+            if (diff := compare(str(case.get("output") or ""), want, mode)) is not None:
+                failures[key] = diff
+    return _graded(expected, failures, [])
+
+
+def stdio_keys(src: str) -> list[TestKey]:
+    """
+    The tests in a report of the stdio runner.
+    """
+    try:
+        return [("stdio", str(c["name"])) for c in json.loads(src)["cases"]]
+    except (ValueError, KeyError, TypeError):
+        return []
+
+
+def _graded(
+    expected: Mapping[TestKey, str], failures: Mapping[TestKey, str], errors: list[str]
+) -> Graded:
     lines: list[str] = []
-    if failed:
+    if failures:
         lines += ["Failed tests:"]
-        lines += [f"- {n}" + ("" if k in outcomes else " (not run)") for k, n in failed]
+        lines += [
+            f"- {expected[k]}" + (f" {m}" if m == "(not run)" else f": {m}" if m else "")
+            for k, m in failures.items()
+        ]
     if errors:
         lines += ["Errors:", *errors]
+    passed = len(expected) - len(failures)
     return Graded(Fraction(passed, len(expected)), feedback="\n".join(lines) or None)
+
+
+def _message(element: ET.Element) -> str:
+    """
+    First lines of a failure message, on one line.
+    """
+    text = element.get("message") or element.text or ""
+    text = " ".join(text.split())
+    return text if len(text) <= MAX_MESSAGE else text[: MAX_MESSAGE - 3] + "..."

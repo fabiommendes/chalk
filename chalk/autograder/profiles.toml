@@ -65,3 +65,69 @@ test.command = """\
 cargo nextest run --offline --locked --profile chalk \
 --config-file {cache}/nextest.toml -E 'kind(test)'; \
 cp target/nextest/chalk/junit.xml "$CHALK_RESULT\""""
+
+[c-make]
+description = "C project built by the template's Makefile, tested with chalk_test.h"
+key = ["Makefile"]
+trusted = ["Makefile"]
+readable = ["{cache}", "{runners}"]
+# The Makefile builds the test program {binary} with $(CFLAGS) and
+# $(LDFLAGS). chalk_test.h is in the include path.
+vars.binary = "run_tests"
+vars.test_timeout = "5"         # seconds per test
+env.CHALK_TEST_TIMEOUT = "{test_timeout}"
+env.CFLAGS = "-O0 -g -Wall -fno-omit-frame-pointer -fsanitize=address,undefined -I{runners}"
+env.LDFLAGS = "-fsanitize=address,undefined"
+# Leak checks need ptrace, which the sandbox does not allow; undefined
+# behavior fails the test instead of printing a warning.
+env.ASAN_OPTIONS = "detect_leaks=0"
+env.UBSAN_OPTIONS = "halt_on_error=1:print_stacktrace=1"
+build.command = "make {binary}"
+build.timeout = 60
+test.command = "./{binary}"
+
+[stdio]
+description = "Program run with each tests/*.in on stdin, compared with the .out files"
+readable = ["{cache}", "{runners}"]
+report = "stdio"
+# The expected outputs never reach the sandbox: chalk compares them.
+hide = ["**/*.out"]
+vars.run = "./main"
+vars.compare = "lines"          # exact | lines | tokens
+vars.test_timeout = "5"         # seconds per case
+test.command = """\
+{python} -I {runners}/stdio.py --report "$CHALK_RESULT" --timeout {test_timeout} \
+--command {run} {tests}"""
+
+[c-stdio]
+extends = "stdio"
+description = "C program compiled with cc, run with each tests/*.in on stdin"
+vars.cflags = "-O2 -Wall"
+build.command = "cc $CFLAGS -o main *.c -lm"
+env.CFLAGS = "{cflags}"
+
+[elm-test]
+description = "Elm application tested with elm-test, packages from elm.json"
+key = ["elm.json"]
+# elm-stuff from the student could carry compiled modules.
+trusted = ["elm.json", "elm-stuff"]
+readable = ["{cache}", "{node_dir}", "{elm_test_dir}", "{elm_dir}"]
+# Elm writes a lock file in ELM_HOME even to read packages, so each run gets
+# a copy of the packages the prepare step downloaded.
+env.ELM_HOME = "{workdir}/.elm-home"
+env.PATH = "{node_dir}/bin:{PATH}"
+probe.node = 'p=$(command -v node) && readlink -f "$p"'
+probe.node_dir = 'p=$(command -v node) && dirname "$(dirname "$(readlink -f "$p")")"'
+probe.elm_test = 'p=$(command -v elm-test) && readlink -f "$p"'
+probe.elm_test_dir = 'p=$(command -v elm-test) && dirname "$(dirname "$(readlink -f "$p")")"'
+probe.elm = 'p=$(command -v elm) && readlink -f "$p"'
+probe.elm_dir = 'p=$(command -v elm) && dirname "$(readlink -f "$p")"'
+probe.version = "elm --version"
+prepare.commands = [
+    "{node} {elm_test} make --compiler {elm}",
+    "cp -a {workdir}/.elm-home {cache}/elm",
+]
+build.seed = { ".elm-home" = "{cache}/elm" }
+build.command = "{node} {elm_test} make --compiler {elm}"
+build.timeout = 120
+test.command = '{node} {elm_test} --compiler {elm} --seed 1 --report junit > "$CHALK_RESULT"'

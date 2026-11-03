@@ -32,6 +32,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tomllib
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
@@ -46,7 +47,15 @@ from typing import Any
 from ..core import disqualification as dq
 from ..core import models
 from ..core.grader import DEFAULT_TIMEOUT, Graded
-from .profiles import PrepareError, TestKey, check_relative, install_trusted_files, read_report
+from .profiles import (
+    PrepareError,
+    TestKey,
+    check_relative,
+    install_trusted_files,
+    read_report,
+    read_stdio_report,
+    stdio_keys,
+)
 from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
 from .script_grader import ScriptGrader
@@ -58,6 +67,9 @@ log = getLogger(__name__)
 
 #: Largest compiler output kept as feedback, in characters.
 MAX_BUILD_FEEDBACK = 8000
+
+#: Files chalk ships for the profiles: the stdio runner and chalk_test.h.
+RUNNERS = Path(__file__).parent / "runners"
 
 #: Profiles implemented in Python, not as data.
 CODE_PROFILES = ("script", "regex")
@@ -181,8 +193,12 @@ class ProfileGrader(ScriptGrader):
                 "template": str(template),
                 "tests": " ".join(self.tests),
                 "PATH": os.environ.get("PATH", ""),
-                **self._probe(repo.root),
+                "python": sys.executable,
+                "runners": str(RUNNERS),
+                **self.spec.vars,
+                **self.conf.vars,
             }
+            variables.update(self._probe(repo.root, variables))
             cache_dir = self._fill_cache(template, variables, repo.root)
             variables["cache"] = str(cache_dir)
             prepared = Prepared(cache_dir, variables, {})
@@ -203,17 +219,24 @@ class ProfileGrader(ScriptGrader):
         sandbox: Sandbox | None,
     ) -> Result:
         prepared = self.prepare()
-        expected = prepared.tests
         return self._run_steps(
             repo,
             prepared,
-            reader=lambda path: read_report(path, expected),
+            reader=self._reader(prepared),
             env=env,
             timeout=timeout,
             on_output_line=on_output_line,
             capture_output=capture_output,
             sandbox=sandbox,
         )
+
+    def _reader(self, prepared: Prepared) -> Callable[[Path], Graded]:
+        expected = prepared.tests
+        if self.spec.report == "stdio":
+            template = self._template()
+            mode = prepared.variables.get("compare", "lines")
+            return lambda path: read_stdio_report(path, expected, template, mode)
+        return lambda path: read_report(path, expected)
 
     def _run_steps(
         self,
@@ -228,6 +251,11 @@ class ProfileGrader(ScriptGrader):
         sandbox: Sandbox | None,
     ) -> Result:
         overlays = install_trusted_files(repo.root, self._template(), self._trusted())
+        for pattern in self.spec.hide:
+            check_relative(pattern)
+            for path in list(repo.root.glob(pattern)):
+                if path.is_file() or path.is_symlink():
+                    path.unlink()
         variables = {**prepared.variables, "workdir": str(repo.root)}
 
         if sandbox is not None:
@@ -288,9 +316,10 @@ class ProfileGrader(ScriptGrader):
             case _:
                 return replace(build, score=dq.BuildError(), feedback=feedback)
 
-    def _probe(self, cwd: Path) -> dict[str, str]:
+    def _probe(self, cwd: Path, variables: Mapping[str, str]) -> dict[str, str]:
         values: dict[str, str] = {}
         for name, command in self.spec.probe.items():
+            command = self._command(command, {**variables, "workdir": str(cwd)})
             proc = _run(command, cwd=cwd, env=dict(os.environ), timeout=60)
             if proc.returncode != 0:
                 raise PrepareError(
@@ -312,8 +341,9 @@ class ProfileGrader(ScriptGrader):
         digest.update(spec.encode() + b"\0")
         for name in self.spec.key:
             digest.update((template / name).read_bytes() + b"\0")
-        for name in sorted(self.spec.probe):
-            digest.update(variables[name].encode() + b"\0")
+        for name in sorted(variables):
+            if name not in ("template", "PATH"):
+                digest.update(f"{name}={variables[name]}".encode() + b"\0")
 
         root = self._cache_root()
         path = root / f"{self.name}-{digest.hexdigest()[:16]}"
@@ -353,9 +383,11 @@ class ProfileGrader(ScriptGrader):
         """
         keys: list[TestKey] = []
 
+        parse = stdio_keys if self.spec.report == "stdio" else junit_keys
+
         def collect(path: Path) -> Graded:
             if path.stat().st_size <= MAX_RESULT_SIZE:
-                keys.extend(junit_keys(path.read_text(errors="replace")))
+                keys.extend(parse(path.read_text(errors="replace")))
             return Graded(Fraction(1))
 
         result = self._run_steps(
@@ -381,6 +413,8 @@ class ProfileGrader(ScriptGrader):
                 f"the reference run of the {self.name} profile has no tests in its "
                 f"report{self._hint()}:\n{details}".rstrip()
             )
+        if self.spec.report == "stdio":
+            return {key: key[1] for key in keys}
         return {key: "::".join(key) for key in keys}
 
     def _env(self, variables: Mapping[str, str]) -> dict[str, str | None]:

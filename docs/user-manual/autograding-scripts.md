@@ -361,9 +361,107 @@ instead, and with `manual` it is left ungraded for `chalk grade`.
 The toolchain is the one `rustc` selects in the template directory, so a
 `rust-toolchain.toml` in the template is honored.
 
+## Programs with input and output files
+
+The `stdio` profile runs the student's program once for each `*.in` file of
+the template's tests, with the file on stdin, and compares the output with
+the `.out` file of the same name. Each case is a test. It fits exercises in
+the style of online judges, in any language.
+
+```
+final-exam/
+└── q3/
+    ├── template/
+    │   └── tests/
+    │       ├── 01.in
+    │       ├── 01.out
+    │       ├── 02.in
+    │       └── 02.out
+    └── solution/
+        └── main.py
+```
+
+```yaml
+questions:
+  - id: q3
+    type: repo
+    autograder:
+      profile: stdio
+      vars:
+        run: python3 main.py   # default ./main
+        compare: tokens        # exact | lines (default) | tokens
+        test_timeout: "2"      # seconds per case, default 5
+```
+
+- `exact` compares the text as is; `lines` ignores spaces at the end of
+  lines and empty lines at the end; `tokens` compares the words, however
+  they are spaced.
+- A case that times out, crashes or exits with an error fails, even with
+  the right output.
+- The `.out` files never reach the sandbox: the student's program cannot
+  read them. Chalk compares the outputs outside the sandbox.
+
+`c-stdio` is the same for a C program: it compiles `*.c` with
+`cc -O2 -Wall -o main *.c -lm` (`vars.cflags` changes the flags), and a
+compiler error is a build error.
+
+## C projects with make
+
+The `c-make` profile builds the test program with the template's
+`Makefile` and runs it. The tests use `chalk_test.h`, a small test library
+chalk ships and puts in the include path:
+
+```c
+// template/tests/test_calc.c
+#include "chalk_test.h"
+#include "calc.h"
+
+TEST(add) { CHECK_EQ(add(1, 2), 3); }
+TEST(sub) { CHECK(sub(3, 2) == 1); }
+TEST(name) { CHECK_STREQ(name(), "calc"); }
+TEST(mean) { CHECK_NEAR(mean(1, 2), 1.5, 1e-9); }
+```
+
+```make
+# template/Makefile
+run_tests: tests/test_calc.c calc.c
+	$(CC) $(CFLAGS) -I. -o $@ $^ $(LDFLAGS)
+```
+
+- The `Makefile` comes from the template. It builds the program
+  `run_tests` (`vars.binary` changes the name) using `$(CFLAGS)` and
+  `$(LDFLAGS)`.
+- Chalk compiles with AddressSanitizer and UndefinedBehaviorSanitizer, so
+  an invalid memory access or undefined behavior fails the test instead of
+  passing by luck. Do not set `limits.memory` with this profile:
+  AddressSanitizer reserves a large address space.
+- Each test runs in its own process. A crash or an endless loop fails
+  only that test (`vars.test_timeout`, default 5 seconds).
+- Include `chalk_test.h` in only one source file: it defines `main`.
+
+To use another test library, extend the profile and change
+`test.command` to a command that writes a JUnit report to
+`$CHALK_RESULT`.
+
+The student's code is linked into the test program, so a determined
+student can tamper with the results from inside it, as with pytest.
+
+## Elm applications with elm-test
+
+The `elm-test` profile compiles the tests with `elm-test make` (a
+compiler error is a build error) and runs them with
+`elm-test --report junit`. The template needs `elm.json` with
+`elm-explorations/test` among the test dependencies. The prepare step
+downloads the packages to the cache; each run gets a copy of them, because
+the compiler writes to its package directory even to read it. Fuzz tests
+run with a fixed seed, so the score does not change between runs.
+
+Chalk looks up `node`, `elm` and `elm-test` in `PATH` and mounts their
+installation directories read only in the sandbox.
+
 ## Custom profiles
 
-`python-pytest` and `rust-cargo` are written as data, in
+The built-in profiles are written as data, in
 [`chalk/autograder/profiles.toml`](https://github.com/fabiommendes/chalk/blob/main/chalk/autograder/profiles.toml).
 A `[profiles.<name>]` table in `chalk.toml` adds a profile with the same
 keys, for any test runner that writes a JUnit report. Questions select it
@@ -407,17 +505,22 @@ env.PYTHONHASHSEED = "42"
 | `unset` | Environment variables removed in every step. |
 | `readable` | Paths the sandbox mounts read only (default `["{cache}"]`). Needed for paths under hidden directories such as the home directory. |
 | `files` | Files written to the cache: name and content. |
+| `hide` | Glob patterns of files removed from the working directory before the build, such as `**/*.out`. |
+| `vars` | Variables for the other keys. The `vars` option of a question overrides them. |
 | `prepare.commands` | Commands that fill the cache, run once outside the sandbox and with the network on, in a copy of the template with the solution. |
 | `build.command` | Optional build step. A failure is a build error. `build.seed` copies cache paths to the working directory first. |
 | `test.command` | Test step. It writes a JUnit report to `$CHALK_RESULT`. |
+| `report` | `junit` (default), or `stdio` for the report of chalk's stdio runner. |
 
 Strings can use the variables `{cache}`, `{template}`, `{workdir}`,
-`{tests}`, `{PATH}` and the probe names. Commands get them shell-quoted,
+`{tests}`, `{PATH}`, `{python}` (the Python running chalk), `{runners}`
+(the directory with the stdio runner and `chalk_test.h`), the `vars` and
+the probe names. Commands get them shell-quoted,
 so `{cache}/run.sh` is safe with spaces. Unknown names such as `${HOME}`
 are left for the shell.
 
 The cache directory, `.chalk/cache/<profile>-<hash>`, is selected by the
-contents of the `key` files, the probe output and the `probe`, `env`,
+contents of the `key` files, the variables and the `probe`, `env`,
 `unset`, `files` and `prepare` keys. Changing any of them prepares a new
 cache. The tests and the solution are not part of it: the reference run
 happens every time chalk grades.
