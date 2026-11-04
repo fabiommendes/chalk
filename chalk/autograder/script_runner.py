@@ -61,6 +61,8 @@ class Result:
     score: Score | Disqualification | None
     feedback: str | None = None
     stdout: str | None = None
+    #: Notes for the teacher, never shown to the student.
+    notes: str | None = None
 
     def __bool__(self) -> bool:
         return self.return_code == 0

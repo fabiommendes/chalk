@@ -63,6 +63,7 @@ from .result_extractor import MAX_RESULT_SIZE
 from .script_grader import ScriptGrader
 from .script_runner import ChalkEnv, Result, Sandbox, ScriptRunner
 from .services import RUNNERS, Services
+from .suspicious import MAX_MATCHES, scan
 
 __all__ = ["ProfileGrader", "builtin_profiles", "render", "resolve_profile", "seed_workdir"]
 
@@ -76,6 +77,9 @@ CODE_PROFILES = ("script", "regex")
 
 #: Reads the report of the test step, given the reports of the services.
 type Reader = Callable[[Path, Sequence[str]], Graded]
+
+#: Prefix of the lines of the pytest guard (runners/pytest_guard.py).
+GUARD_PREFIX = "chalk-guard: "
 
 _VARIABLE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -222,7 +226,13 @@ class ProfileGrader(ScriptGrader):
         sandbox: Sandbox | None,
     ) -> Result:
         prepared = self.prepare()
-        return self._run_steps(
+        found = scan(
+            repo.root,
+            template=self._template(),
+            patterns=self.spec.suspicious,
+            skip=self._trusted(),
+        )
+        result = self._run_steps(
             repo,
             prepared,
             reader=self._reader(prepared),
@@ -232,6 +242,16 @@ class ProfileGrader(ScriptGrader):
             capture_output=capture_output,
             sandbox=sandbox,
         )
+        refused = [
+            line.partition(GUARD_PREFIX)[2].strip()
+            for line in (result.stdout or "").splitlines()
+            if GUARD_PREFIX in line
+        ][:MAX_MATCHES]
+        if refused and result.score == dq.Error():
+            # Such as a file with the name of a standard module.
+            feedback = "\n".join([result.feedback or "", *refused]).strip()
+            result = replace(result, feedback=feedback)
+        return replace(result, notes=_notes(found, refused))
 
     def _reader(self, prepared: Prepared) -> Reader:
         expected = prepared.tests
@@ -482,6 +502,15 @@ class ProfileGrader(ScriptGrader):
             path = self.question.quiz.classroom.root / ".chalk" / "cache"
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+
+def _notes(found: list[str], refused: list[str]) -> str | None:
+    lines: list[str] = []
+    if found:
+        lines += ["Suspicious code (the score was not changed):", *(f"- {f}" for f in found)]
+    if refused:
+        lines += ["Refused by the guard during the tests:", *(f"- {r}" for r in refused)]
+    return "\n".join(lines) or None
 
 
 def junit_keys(src: str) -> list[TestKey]:

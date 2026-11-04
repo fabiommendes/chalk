@@ -263,6 +263,8 @@ def check_autograder(question: Question, *, timeout: float | None, keep_files: b
     rich.print(f"Reference solution: {graded}")
     if graded.feedback:
         rich.print(Panel(graded.feedback, title="Feedback", expand=False))
+    if graded.notes:
+        rich.print(Panel(graded.notes, title="Notes", expand=False, style="yellow"))
     if not is_score(graded.score) or graded.score < 1:
         rich.print("[red]The reference solution does not get the full score.[/]")
         raise typer.Exit(1)
@@ -407,6 +409,8 @@ def run_autograder(
             continue
         else:
             show(graded)
+        if graded.notes:
+            rich.print(Panel(graded.notes, title=f"Notes on {student.id}", style="yellow"))
 
         has_changed = True
         grades.set_score(
@@ -415,6 +419,7 @@ def run_autograder(
             question=question,
             feedback=graded.feedback,
             adjustments=graded.adjustments,
+            notes=graded.notes,
         )
         if has_changed and not dry_run:
             grades.save()

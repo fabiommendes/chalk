@@ -133,6 +133,36 @@ Isso detém o aluno que tenta trapacear com pouco esforço e deixa rastro
 para o resto. Para prova de alto risco, a saída é revisar os suspeitos à
 mão.
 
+Depois das fases, conferimos o limite na prática: um `atexit` de 5 linhas
+reescrevia o `$CHALK_RESULT` depois do pytest e dava nota 1. Viraram duas
+defesas, que aumentam o trabalho de quem tenta burlar sem fechar a porta:
+
+- `runners/pytest_guard.py`, um plugin carregado com `-p` e ligado por
+  padrão no `python-pytest` (`vars.guard = "off"` desliga). Ele instala um
+  audit hook (PEP 578), que não pode ser removido depois de instalado:
+  - qualquer acesso a um caminho com `chalk-result-` é recusado, exceto
+    pelo `_pytest/junitxml.py` sem código do aluno na pilha. Isso fecha
+    também a escrita por uma thread com alvo da stdlib;
+  - com código do aluno na pilha, também recusa subprocesso, `ctypes`,
+    escrita em `/proc` e `gc.get_objects`/`get_referrers`;
+  - o pytest não sobe se algum módulo do aluno já estiver carregado antes
+    do plugin (um arquivo com nome de módulo da stdlib que o pytest
+    importa cedo). `sitecustomize.py` e `usercustomize.py` viraram
+    arquivos confiáveis.
+- Notas para o professor: um campo novo `notes` em `ResponseGrade`, com
+  linha própria (`notes`) no `grades.csv` e fora do feedback. Elas
+  recebem os achados da chave `suspicious` dos perfis (regex por glob,
+  mais `CHALK_RESULT`, `junit` e `/proc/` para todo perfil) e as recusas
+  do guard, que ele imprime com o prefixo `chalk-guard:`. A nota não muda.
+
+Descartados: bloquear `exec`/`eval` (o ataque não precisa deles, e
+`dataclasses` e `namedtuple` usam `exec`) e trocar o `sys` por um módulo
+só leitura (quebra o pytest e é contornável por `importlib`). Brechas
+conhecidas: um aluno que conhece o hook pode alterar o estado dele sem
+`gc` (pelos frames, por exemplo), ou contornar a checagem de pilha. Para
+`c-make`, o mesmo ataque segue aberto. `rust-cargo` é mais difícil de
+forjar; `stdio` e `services` não deixam forjar.
+
 
 ## Abstração: sandbox, perfil e formato do relatório
 

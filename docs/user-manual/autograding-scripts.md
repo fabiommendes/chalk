@@ -295,10 +295,39 @@ pytest_plugins = ["pytest_asyncio"]
 A test the template always skips counts as a failure for every student;
 remove it from the template instead.
 
-The tests import the student's code in the same process, so a determined
-student can still tamper with pytest from inside it. The profile stops the
-easy tricks (editing or deleting tests, a `conftest.py`, printing a fake
-result) and keeps the output in `chalk.stdout` for review.
+### Tampering with the report
+
+The tests import the student's code in the same process as pytest, so that
+code could rewrite the report after pytest writes it. A few lines with
+`atexit` are enough. The profile has two defenses. Neither one is a
+sandbox, and a determined student can still get around them:
+
+- **A guard.** The `pytest_guard` plugin that ships with chalk installs an
+  audit hook (PEP 578), which cannot be removed once installed. Only
+  pytest's JUnit writer can touch the report. While the student's code is
+  running, the guard also refuses subprocesses, `ctypes`, writes under
+  `/proc` and `gc.get_objects`. pytest does not start when a file of the
+  project has the name of a standard module that pytest loads early (such
+  as `textwrap.py`). Questions whose code needs subprocesses turn the guard
+  off:
+
+  ```yaml
+      autograder:
+        profile: python-pytest
+        vars: {guard: "off"}
+  ```
+
+- **Notes for the teacher.** Chalk searches the student's files for signs
+  of tampering, such as `atexit`, `exec`, `sys.modules`, `CHALK_RESULT`,
+  `junit` and `base64`. Every match and every refusal of the guard becomes
+  a note. The score does not change. Notes appear after the student's line
+  in `chalk autograde` and in a `notes` row of the grades file, which is
+  never part of the feedback. Files identical to the template's are not
+  searched.
+
+The profile also stops the simpler tricks: editing or deleting tests,
+shipping a `conftest.py` or `sitecustomize.py`, printing a fake result.
+The output stays in `chalk.stdout` for review.
 
 ## Rust crates with cargo
 
@@ -511,6 +540,7 @@ env.PYTHONHASHSEED = "42"
 | `build.command` | Optional build step. A failure is a build error. `build.seed` copies cache paths to the working directory first. |
 | `test.command` | Test step. It writes a JUnit report to `$CHALK_RESULT`. |
 | `report` | `junit` (default), or `stdio` for the report of chalk's stdio runner. |
+| `suspicious` | Signs of tampering searched in the student's files, as `glob -> {reason = regex}`. Matches become notes for the teacher. See [Tampering with the report](#tampering-with-the-report). |
 | `services` | Servers the student's code talks to during the test step. See [Services](#services). |
 
 Strings can use the variables `{cache}`, `{template}`, `{workdir}`,

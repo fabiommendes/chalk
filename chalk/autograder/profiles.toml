@@ -10,23 +10,44 @@
 description = "Python project tested with pytest, dependencies from uv.lock"
 key = ["pyproject.toml", "uv.lock"]
 # Every file pytest reads its configuration from comes from the template.
-trusted = ["conftest.py", "pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"]
-readable = ["{cache}", "{python}"]
+# sitecustomize.py would run before pytest.
+trusted = [
+    "conftest.py", "pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg",
+    "sitecustomize.py", "usercustomize.py", "src/sitecustomize.py", "src/usercustomize.py",
+]
+readable = ["{cache}", "{python}", "{runners}"]
 # Plugins are not loaded automatically: the student could add a dist-info
 # with a pytest11 entry point. The template's conftest.py loads the plugins
-# it needs with `pytest_plugins`.
-env.PYTHONPATH = "{workdir}/src:{workdir}"
+# it needs with `pytest_plugins`. {runners} has pytest_guard, the plugin
+# that stops the code under test from rewriting the report.
+env.PYTHONPATH = "{runners}:{workdir}/src:{workdir}"
 env.PYTHONDONTWRITEBYTECODE = "1"
 env.PYTHONHASHSEED = "0"
 env.PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
 env.UV_PROJECT_ENVIRONMENT = "{cache}/venv"
+env.CHALK_GUARD = "{guard}"
+env.CHALK_GUARD_TRUSTED = "{tests}"
 unset = ["PYTHONHOME"]
+vars.guard = "on"               # off: code under test may run subprocesses and ctypes
 # Python installations of uv, hidden in the home directory.
 probe.python = "uv python dir"
 prepare.commands = ["uv sync --frozen --no-install-project"]
 test.command = """\
-{cache}/venv/bin/python -m pytest --rootdir {workdir} -p no:cacheprovider \
+{cache}/venv/bin/python -m pytest --rootdir {workdir} -p no:cacheprovider -p pytest_guard \
 --junit-xml "$CHALK_RESULT" {tests}"""
+
+[python-pytest.suspicious."**/*.py"]
+"registers exit handlers" = '\batexit\b'
+"exits without cleanup" = 'os\._exit'
+"changes loaded modules" = 'sys\.modules'
+"runs code from strings" = '(?<![\w.])(exec|eval|compile)\s*\('
+"imports modules dynamically" = '__import__|\bimportlib\b'
+"uses ctypes" = '\bctypes\b'
+"decodes base64" = '\bbase64\b|b64decode'
+"inspects live objects" = '\bgc\.get_(objects|referrers|referents)\b'
+"walks stack frames" = 'sys\._getframe|\binspect\.(currentframe|stack)\b'
+"refers to pytest internals" = '\b_pytest\b|\bpytest_\w+'
+"adds audit hooks" = '\baddaudithook\b'
 
 [rust-cargo]
 description = "Rust crate tested with cargo nextest, dependencies from Cargo.lock"

@@ -57,6 +57,9 @@ RENDERED_COMMON_FRACTIONS_INV = {v: k for k, v in RENDERED_COMMON_FRACTIONS.item
 
 
 type Field = str
+
+#: Rows of the grades file besides the score, one per student that has them.
+EXTRA_FIELDS = ("feedback", "notes")
 type _SubmissionsIter = Iterable[tuple[StudentId, models.SubmissionGrade]]
 type _ResponsesIter = Iterable[tuple[QuestionId, models.ResponseGrade]]
 
@@ -247,6 +250,7 @@ class Grades:
         student: StudentId | Student,
         feedback: str | None = NOT_GIVEN,
         adjustments: list[models.Adjustment] | None = NOT_GIVEN,
+        notes: str | None = NOT_GIVEN,
     ) -> None:
         """
         Save score for the given question and student.
@@ -268,6 +272,8 @@ class Grades:
             response.feedback = feedback
         if adjustments is not NOT_GIVEN:
             response.adjustments = adjustments
+        if notes is not NOT_GIVEN:
+            response.notes = notes
 
     def get_dataframe(self, total: str | bool = False) -> pd.DataFrame:
         """
@@ -744,18 +750,21 @@ def save_grades_to_path(
     writer = csv.writer(file)
 
     has_global_feedback = False
-    has_feedback: set[StudentId] = set()
+    #: Students with a row of each extra field.
+    extra: dict[str, set[StudentId]] = {field: set() for field in EXTRA_FIELDS}
 
     for submission in grades.values():
         if submission.feedback is not None:
             has_global_feedback = True
-        for qid, response in submission.responses.items():
-            if response.feedback is not None:
-                has_feedback.add(submission.id)
+        for response in submission.responses.values():
+            for field, students in extra.items():
+                if getattr(response, field) is not None:
+                    students.add(submission.id)
 
     # Create header row
     columns = ["id"]
-    if has_feedback:
+    has_field = any(extra.values())
+    if has_field:
         columns.append("field")
     if has_global_feedback:
         columns.append("feedback")
@@ -765,7 +774,7 @@ def save_grades_to_path(
     # Write rows for each student
     for student_id, submission in grades.items():
         row = [student_id]
-        if has_feedback:
+        if has_field:
             row.append("score")
         if has_global_feedback:
             row.append("" if submission.feedback is None else submission.feedback)
@@ -774,17 +783,17 @@ def save_grades_to_path(
             row.append(render_score(response.score) if response is not None else "")
         writer.writerow(row)
 
-        # Write feedback row for each question
-        if student_id in has_feedback:
-            row = ["", "feedback"]  # Empty id for feedback row
+        # A row of feedback and one of notes, with an empty id
+        for field, students in extra.items():
+            if student_id not in students:
+                continue
+            row = ["", field]
             if has_global_feedback:
-                row.append("")  # Empty global feedback
+                row.append("")
             for qid in question_ids:
                 response = submission.responses.get(qid)
-                if response is None or response.feedback is None:
-                    row.append("")
-                else:
-                    row.append(response.feedback)
+                value = None if response is None else getattr(response, field)
+                row.append("" if value is None else value)
             writer.writerow(row)
 
 

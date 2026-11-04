@@ -40,6 +40,9 @@ class Graded(NamedTuple):
     score: Score | Disqualification
     feedback: str | None = None
     adjustments: list[Adjustment] | None = None
+    #: Notes for the teacher, such as signs of tampering. Never shown to
+    #: the student.
+    notes: str | None = None
 
     def adjusted_score(self) -> Score | Disqualification:
         """

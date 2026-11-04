@@ -130,6 +130,10 @@ class ResponseGrade(BaseModel):
         PlainSerializer(s.optional_list(s.serializable)),
     ] = None
     feedback: str | None = None
+    notes: Annotated[
+        str | None,
+        Field(description="Notes for the teacher, such as signs of tampering. Not for students."),
+    ] = None
 
 
 class SubmissionGrade(BaseModel):
@@ -441,6 +445,15 @@ class Profile(BaseModel):
         Field(description="Files written to the cache directory: name -> content."),
     ] = {}
     prepare: PrepareStep = Field(default_factory=PrepareStep)
+    suspicious: Annotated[
+        dict[str, dict[str, str]],
+        Field(
+            description=(
+                "Signs of tampering searched in the student's files: glob -> {reason: regex}. "
+                "Matches become notes for the teacher; the score does not change."
+            ),
+        ),
+    ] = {}
     services: Annotated[
         dict[str, Service],
         Field(
