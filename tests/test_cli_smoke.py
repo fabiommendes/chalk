@@ -30,6 +30,7 @@ COMMANDS = [
     "autograde p1 q1 --yes",
     "autograde p1 q2 --yes",
     "codehood grades",
+    "codehood autograde --help",
     "quiz create p2 --name P2 --questions 3",
     "contrib",
     "contrib github.classroom --help",

@@ -152,3 +152,22 @@ build.seed = { ".elm-home" = "{cache}/elm" }
 build.command = "{node} {elm_test} make --compiler {elm}"
 build.timeout = 120
 test.command = '{node} {elm_test} --compiler {elm} --seed 1 --report junit > "$CHALK_RESULT"'
+
+[prolog-plunit]
+description = "Prolog program tested with plunit, one swipl process per test"
+tests = ["tests.pl"]
+readable = ["{cache}", "{runners}", "{swipl_home}"]
+probe.swipl = "command -v swipl"
+probe.swipl_home = '''swipl -g "current_prolog_flag(home, H), writeln(H)" -t halt'''
+# on: the program is read before anything runs, and every clause body and
+# directive must pass safe_goal/1 of library(sandbox). What is refused is a
+# build error, listed in the notes and not in the feedback. off: the program
+# may do I/O, and halt/0 only ends its own test.
+vars.safe = "on"
+vars.test_timeout = "5"         # seconds per test
+build.command = """\
+{swipl} -q -f none {runners}/prolog_plunit.pl -- check {safe} "$CHALK_ANSWER\""""
+build.timeout = 60
+test.command = """\
+{python} -I {runners}/prolog_plunit.py --swipl {swipl} --answer "$CHALK_ANSWER" \
+--report "$CHALK_RESULT" --timeout {test_timeout} {tests}"""

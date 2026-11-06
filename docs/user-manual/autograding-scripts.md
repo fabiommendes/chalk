@@ -488,6 +488,40 @@ run with a fixed seed, so the score does not change between runs.
 Chalk looks up `node`, `elm` and `elm-test` in `PATH` and mounts their
 installation directories read only in the sandbox.
 
+## Prolog programs with plunit
+
+The `prolog-plunit` profile runs the plunit tests of the template, by default
+`template/tests.pl`, against the student's file. `swipl` is looked up in
+`PATH`. Each test runs in a `swipl` process of its own, with a timeout
+(`vars.test_timeout`, 5 seconds), so an infinite loop or a `halt/0` fails only
+that test. The score is the share of the tests of the reference solution that
+pass.
+
+```
+q1/
+├── solution/answer.pl
+└── template/tests.pl
+```
+
+```yaml
+autograder: {profile: prolog-plunit, answer: answer.pl}
+```
+
+Before anything runs, the program is read and every clause body and directive
+must pass `safe_goal/1` of `library(sandbox)`, the check SWISH uses. A program
+that calls `halt`, `shell`, opens files, uses `initialization(halt)` and so on
+is refused: the answer is a build error, the refused calls are listed in the
+notes for the teacher, and the student only sees that the program is not
+allowed. Clauses defined in another module (such as `plunit:run_tests`) are
+refused too. Note that `print/1` and other predicates that call user hooks
+are not safe for `library(sandbox)`.
+
+Set `vars: {safe: "off"}` for questions whose answers need I/O. The program
+then runs unchecked, apart from the sandbox, and `halt/0` ends only its own
+test. The verdict of a test is a line that only the trusted runner can print
+(it knows a secret that the student's program does not receive), not the exit
+code or the output of the program.
+
 ## Custom profiles
 
 The built-in profiles are written as data, in

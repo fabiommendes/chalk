@@ -34,9 +34,11 @@ comando não interativo; comando novo entra na lista.
 Uma turma pode ser ao mesmo tempo projeto chalk e curso codehood. Regras em
 `design/mdq-e-roster.md`:
 
-- O chalk não lê nem escreve arquivos do codehood, exceto `roster.csv`
-  (esquema compartilhado) e as colunas de quiz do `grades.csv`
-  (`chalk codehood grades`).
+- O chalk lê `codehood.toml`, `questions/`, `exams/` e `graders/` do curso e
+  fala com a REST do codehood, só para `chalk codehood autograde` (chave `BOT`
+  em `CODEHOOD_BOT_KEY` ou `--key-file`; a chave nunca entra no sandbox).
+  Fora isso, ele só toca o `roster.csv` (esquema compartilhado) e as colunas
+  de quiz do `grades.csv` (`chalk codehood grades`).
 - Ao salvar `roster.csv`, preserve colunas desconhecidas, a ordem das colunas
   e as linhas sem id.
 

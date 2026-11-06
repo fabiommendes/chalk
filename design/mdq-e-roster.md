@@ -29,6 +29,11 @@ turma/
 O codehood só lê os arquivos e pastas dele, e o chalk só trata como quiz
 uma pasta com `conf.yaml`. O único arquivo disputado é `roster.csv`.
 
+Exceção: `chalk codehood autograde` também lê `codehood.toml`, `questions/`,
+`exams/` e `graders/<caminho>/` (`grader.yaml`, `template/`, `solution/`) e
+fala com a REST do codehood. Só ele usa a API; os outros comandos seguem sem
+rede. Ver `design/codehood-autograde.md`.
+
 
 ## Questões
 
@@ -111,6 +116,11 @@ Implementado:
   codehood. O caminho é relativo à pasta do quiz. O id da questão no quiz é
   o da entrada; o id declarado no arquivo é ignorado, porque no banco do
   codehood ele não segue o nome do arquivo do quiz.
+
+- `chalk codehood autograde`: corrige as respostas de código de uma prova com
+  os perfis do autograder e grava `Feedback` com a chave `BOT`. Cliente REST
+  em `chalk/codehood_api.py` (biblioteca padrão), lógica em
+  `chalk/codehood_autograde.py`.
 
 Propostas, ainda sem decisão:
 

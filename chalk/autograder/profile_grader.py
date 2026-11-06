@@ -360,7 +360,10 @@ class ProfileGrader(ScriptGrader):
                 services.stop(repo)
 
     def _build_error(self, build: Result) -> Result:
-        output = build.stdout or ""
+        # Lines of the guard are for the teacher and go to the notes.
+        output = "\n".join(
+            line for line in (build.stdout or "").splitlines() if GUARD_PREFIX not in line
+        )
         if len(output) > MAX_BUILD_FEEDBACK:
             output = output[:MAX_BUILD_FEEDBACK] + "\n[...]"
         feedback = f"The code does not compile:\n{output}".rstrip()
@@ -509,7 +512,7 @@ def _notes(found: list[str], refused: list[str]) -> str | None:
     if found:
         lines += ["Suspicious code (the score was not changed):", *(f"- {f}" for f in found)]
     if refused:
-        lines += ["Refused by the guard during the tests:", *(f"- {r}" for r in refused)]
+        lines += ["Refused by the guard:", *(f"- {r}" for r in refused)]
     return "\n".join(lines) or None
 
 
