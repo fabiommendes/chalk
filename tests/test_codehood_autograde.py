@@ -363,6 +363,23 @@ class TestWriting:
         assert "halt" in written["notes"] or "initialization" in written["notes"]
         assert written["notes"] not in written["feedback"]
 
+    def test_all_or_nothing_writes_zero_for_a_half_right_answer(self, course, server) -> None:
+        yaml = GRADER_YAML + "scoring: all-or-nothing\n"
+        _, written = self.grade_one(course, server, WRONG, grader_yaml=yaml)
+        assert Fraction(written["score"]) == 0
+        lines = feedback_lines(written["feedback"])
+        assert "✗" in next(line for line in lines if "fat5" in line)
+        assert "✓" in next(line for line in lines if "inverso" in line)
+
+    def test_failing_scoring_script_writes_nothing(self, course, server) -> None:
+        yaml = GRADER_YAML + "scoring: script\nscoring_script: score.py\n"
+        add_question(course, grader_yaml=yaml)
+        write(course / "graders/logico/aritmetica/fatorial-com-is/score.py", "raise SystemExit(2)")
+        server.add_exam("p1", [SLUG])
+        (sid,) = server.add_attempt("lia", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
+        autograde(server, "--exam", "p1")
+        assert sid not in server.feedback
+
     def test_timeout_writes_zero(self, course, server) -> None:
         yaml = GRADER_YAML.replace("timeout: 20", "timeout: 3")
         _, written = self.grade_one(course, server, LOOPS_ON_LOAD, grader_yaml=yaml)

@@ -43,6 +43,9 @@ turma/
   `highlight` da questão (`prolog` → `prolog-plunit`, `elm` → `elm-test`,
   `python` → `python-pytest`).
 - Os perfis do `chalk.toml` da turma valem aqui também.
+- `scoring: proportional | all-or-nothing | script` (com `scoring_script`,
+  relativo à pasta do grader) muda como os testes viram nota; falha do
+  script é erro de infraestrutura e não grava nada.
 
 ## Comando
 

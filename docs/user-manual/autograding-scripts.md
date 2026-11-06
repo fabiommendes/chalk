@@ -522,6 +522,56 @@ test. The verdict of a test is a line that only the trusted runner can print
 (it knows a secret that the student's program does not receive), not the exit
 code or the output of the program.
 
+## Scoring
+
+Profiles that report per-test results (JUnit reports and `stdio`) score the
+fraction of expected tests that passed. The expected tests are the ones the
+reference solution runs. `autograder.scoring` changes that:
+
+- `proportional` (default): passed tests over expected tests.
+- `all-or-nothing`: 1 when every expected test passed, else 0.
+- `script`: a teacher script gives the score. `scoring_script` is its path,
+  relative to the folder of the configuration (the question folder, or the
+  grader folder in `chalk codehood autograde`).
+
+```yaml
+autograder:
+  profile: prolog-plunit
+  scoring: script
+  scoring_script: score.py
+```
+
+The feedback (a line per failed test) is the same in all modes. Build errors,
+timeouts and `on_build_error` happen before scoring and do not change.
+
+`scoring_script` is teacher code: it is trusted and runs outside the sandbox,
+with the Python that runs chalk (`python -I`) and a timeout of 10 seconds.
+It receives on stdin the result of every expected test, where a test missing
+from the report has `passed` false:
+
+```json
+{"tests": [{"name": "tests::fat5", "passed": false, "message": "..."}],
+ "expected": ["tests::fat5", "tests::inverso"]}
+```
+
+and prints the score on stdout, a decimal (`0.25`) or a fraction (`1/4`) in
+[0, 1]:
+
+```python
+import json, sys
+
+data = json.load(sys.stdin)
+weights = {"tests::fat5": 3, "tests::inverso": 1}
+got = sum(weights[t["name"]] for t in data["tests"] if t["passed"])
+print(f"{got}/{sum(weights.values())}")
+```
+
+A non-zero exit, output that is not a score, a score out of range or a
+timeout is an infrastructure error for that answer: the answer is
+disqualified with `Error` (the message has the stderr of the script), and
+`chalk codehood autograde` writes no grade. `scoring_script` without
+`scoring: script`, or the reverse, is a configuration error.
+
 ## Custom profiles
 
 The built-in profiles are written as data, in

@@ -60,6 +60,7 @@ from .profiles import (
 )
 from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
+from .scoring import make_scorer
 from .script_grader import ScriptGrader
 from .script_runner import ChalkEnv, Result, Sandbox, ScriptRunner
 from .services import RUNNERS, Services
@@ -255,11 +256,14 @@ class ProfileGrader(ScriptGrader):
 
     def _reader(self, prepared: Prepared) -> Reader:
         expected = prepared.tests
+        scorer = make_scorer(self.conf, self.question.root)
         if self.spec.report == "stdio":
             template = self._template()
             mode = prepared.variables.get("compare", "lines")
-            return lambda path, extra: read_stdio_report(path, expected, template, mode, extra)
-        return lambda path, extra: read_report(path, expected, extra)
+            return lambda path, extra: read_stdio_report(
+                path, expected, template, mode, extra, scorer
+            )
+        return lambda path, extra: read_report(path, expected, extra, scorer)
 
     def _run_steps(
         self,

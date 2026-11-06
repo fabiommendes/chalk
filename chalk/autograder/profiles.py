@@ -16,6 +16,7 @@ from pathlib import Path
 from ..core import disqualification as dq
 from ..core.grader import Graded
 from .result_extractor import MAX_RESULT_SIZE
+from .scoring import Scorer, ScoringError
 
 __all__ = [
     "PrepareError",
@@ -84,13 +85,23 @@ def install_trusted_files(
     return overlays
 
 
-def read_report(path: Path, expected: Mapping[TestKey, str], extra: Sequence[str] = ()) -> Graded:
+def read_report(
+    path: Path,
+    expected: Mapping[TestKey, str],
+    extra: Sequence[str] = (),
+    scorer: Scorer | None = None,
+) -> Graded:
     if path.stat().st_size > MAX_RESULT_SIZE:
         return Graded(dq.Error(), feedback="Test report is too large.")
-    return score_report(path.read_text(errors="replace"), expected, extra)
+    return score_report(path.read_text(errors="replace"), expected, extra, scorer)
 
 
-def score_report(src: str, expected: Mapping[TestKey, str], extra: Sequence[str] = ()) -> Graded:
+def score_report(
+    src: str,
+    expected: Mapping[TestKey, str],
+    extra: Sequence[str] = (),
+    scorer: Scorer | None = None,
+) -> Graded:
     """
     Score a JUnit report against the expected tests, a map from the
     (classname, name) pair in the report to the name shown in the feedback.
@@ -99,13 +110,14 @@ def score_report(src: str, expected: Mapping[TestKey, str], extra: Sequence[str]
     Missing tests, tests skipped by the student's code and repeated entries
     with a failure count as failures. Tests not in the expected list are
     ignored. The JUnit reports of the services in extra count as part of the
-    report.
+    report. The scorer, if any, decides the score instead of the proportion
+    of passed tests.
     """
     try:
         results, errors = junit_results(src)
     except ET.ParseError as e:
         return Graded(dq.Error(), feedback=f"Invalid JUnit report: {e}")
-    return _score(expected, results, errors, extra)
+    return _score(expected, results, errors, extra, scorer)
 
 
 def junit_results(src: str) -> tuple[dict[TestKey, str | None], list[str]]:
@@ -138,6 +150,7 @@ def read_stdio_report(
     template: Path,
     mode: str,
     extra: Sequence[str] = (),
+    scorer: Scorer | None = None,
 ) -> Graded:
     """
     Score the report of chalk's stdio runner: each case passes when it ran
@@ -165,7 +178,7 @@ def read_stdio_report(
         else:
             want = (template / f"{key[1]}.out").read_text(errors="replace")
             results[key] = compare(str(case.get("output") or ""), want, mode)
-    return _score(expected, results, [], extra)
+    return _score(expected, results, [], extra, scorer)
 
 
 def stdio_keys(src: str) -> list[TestKey]:
@@ -183,6 +196,7 @@ def _score(
     results: dict[TestKey, str | None],
     errors: list[str],
     extra: Sequence[str],
+    scorer: Scorer | None = None,
 ) -> Graded:
     for src in extra:
         try:
@@ -203,11 +217,15 @@ def _score(
         for k in expected
         if results.get(k, "") is not None
     }
-    return _graded(expected, failures, errors)
+    return _graded(expected, failures, errors, results, scorer)
 
 
 def _graded(
-    expected: Mapping[TestKey, str], failures: Mapping[TestKey, str], errors: list[str]
+    expected: Mapping[TestKey, str],
+    failures: Mapping[TestKey, str],
+    errors: list[str],
+    results: Mapping[TestKey, str | None],
+    scorer: Scorer | None,
 ) -> Graded:
     lines: list[str] = []
     if failures:
@@ -218,8 +236,22 @@ def _graded(
         ]
     if errors:
         lines += ["Errors:", *errors]
-    passed = len(expected) - len(failures)
-    return Graded(Fraction(passed, len(expected)), feedback="\n".join(lines) or None)
+    feedback = "\n".join(lines) or None
+    if scorer is None:
+        return Graded(Fraction(len(expected) - len(failures), len(expected)), feedback=feedback)
+
+    tests = [
+        {
+            "name": name,
+            "passed": key not in failures,
+            "message": (failures[key] or None) if key in failures else None,
+        }
+        for key, name in expected.items()
+    ]
+    try:
+        return Graded(scorer(tests, list(expected.values())), feedback=feedback)
+    except ScoringError as e:
+        return Graded(dq.Error(), feedback=str(e))
 
 
 def _message(element: ET.Element) -> str:

@@ -18,6 +18,7 @@ from pydantic import (
     PlainValidator,
     Tag,
     model_serializer,
+    model_validator,
 )
 
 from ..data import serializers as s
@@ -625,6 +626,32 @@ class Autograder(BaseModel):
             ),
         ),
     ] = None
+    scoring: Annotated[
+        Literal["proportional", "all-or-nothing", "script"],
+        Field(
+            description=(
+                "Profiles with per-test results: 'proportional' scores passed / expected "
+                "tests, 'all-or-nothing' gives 1 when every expected test passed and 0 "
+                "otherwise, 'script' runs `scoring_script`."
+            ),
+        ),
+    ] = "proportional"
+    scoring_script: Annotated[
+        Path | None,
+        Field(
+            description=(
+                "scoring 'script': teacher script, relative to the folder of the configuration. "
+                "It reads the test results as JSON from stdin and prints the score, a decimal "
+                "or n/d in [0, 1]. It runs outside the sandbox."
+            ),
+        ),
+    ] = None
+
+    @model_validator(mode="after")
+    def _check_scoring(self) -> Autograder:
+        if (self.scoring == "script") != (self.scoring_script is not None):
+            raise ValueError("`scoring_script` goes together with `scoring: script`")
+        return self
 
 
 #
