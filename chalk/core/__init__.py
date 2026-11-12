@@ -10,7 +10,7 @@ from .quiz import Quiz
 from .score import BoundScore, Score
 from .student import Student
 
-INVALID_ASSIGNMENT_NAMES = {
+RESERVED_NAMES = {
     "chalk",
     "roster",
     "data",
@@ -57,7 +57,7 @@ def validate_quiz_id(src: str) -> QuizId:
 
 
 def _validate_entity_id(src: str, /, entity: str) -> str:
-    if src in INVALID_ASSIGNMENT_NAMES:
+    if src in RESERVED_NAMES:
         raise ValueError(f"Invalid {entity} name: {src!r}")
     if src.startswith("_"):
         raise ValueError(f"{entity.title()} names cannot start with '_'")

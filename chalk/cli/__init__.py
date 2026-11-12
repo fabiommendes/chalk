@@ -19,15 +19,6 @@ app = typer.Typer(name="Chalk", no_args_is_help=True, add_help_option=True)
 
 NOT_GIVEN = object()
 ADD_STUDENT_OPTIONS = {"email", "github", "name", "force"}
-ADD_SIMPLE_ASSIGNMENT_OPTIONS = {
-    "name",
-    "start",
-    "end",
-    "questions",
-    "format",
-    "split",
-    "force",
-}
 
 init_app.add_init_command(app)
 app.add_typer(

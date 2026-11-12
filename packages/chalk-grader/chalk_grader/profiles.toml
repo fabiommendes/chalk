@@ -1,3 +1,4 @@
+# r2: adr-0003
 # Built-in autograder profiles. A [profiles.<name>] table in chalk.toml
 # with the same keys adds a profile, or changes one of these with
 # `extends = "<name>"`. The keys are documented in

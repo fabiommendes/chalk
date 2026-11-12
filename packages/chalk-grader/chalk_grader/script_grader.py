@@ -74,7 +74,7 @@ class ScriptGrader:
                     answer=data,
                     answer_path=str(self._answer_path()),
                     question_id=self.task.question_id,
-                    assignment_id=self.task.assignment_id,
+                    quiz_id=self.task.quiz_id,
                     student_id=id,
                     pass_env=tuple(self.conf.pass_env),
                 ),
@@ -193,7 +193,7 @@ class ScriptGrader:
         """
         info = {
             "question_id": self.task.question_id,
-            "quiz_id": self.task.assignment_id,
+            "quiz_id": self.task.quiz_id,
             "answer_path": self._answer_path(),
             **kwargs,
         }

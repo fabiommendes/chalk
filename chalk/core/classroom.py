@@ -51,6 +51,7 @@ RESERVED_NON_QUIZ_NAMES = {
 }
 
 
+# r2: adr-0007
 class Classroom:
     """
     A classroom object.

@@ -23,7 +23,7 @@ def main(
     quiz_id: Annotated[
         str,
         typer.Argument(
-            metavar="ASSIGNMENT",
+            metavar="QUIZ",
             help="Quiz id",
         ),
     ],

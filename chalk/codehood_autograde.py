@@ -247,7 +247,7 @@ def make_grader(found: FoundGrader, course: CourseConfig) -> ProfileGrader:
     template = folder / (found.conf.template or Path("template"))
     task = Task(
         question_id=found.slug,
-        assignment_id="codehood",
+        quiz_id="codehood",
         root=folder,
         template=template if template.is_dir() else None,
     )

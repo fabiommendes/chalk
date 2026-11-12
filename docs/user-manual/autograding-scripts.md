@@ -79,7 +79,9 @@ variables are described in the following table:
 | -------------------- | ------------ | -------------------------------------------------------- |
 | CHALK_QUESTION       |              | ID of the question being graded.                         |
 | -------------------- | ------------ | -------------------------------------------------------- |
-| CHALK_ASSIGNMENT     |              | ID of the quiz being graded.                             |
+| CHALK_QUIZ           |              | ID of the quiz being graded.                             |
+| -------------------- | ------------ | -------------------------------------------------------- |
+| CHALK_ASSIGNMENT     |              | Deprecated alias of CHALK_QUIZ.                          |
 | -------------------- | ------------ | -------------------------------------------------------- |
 | CHALK_ROOT           |              | Absolute path to the working directory of the submission |
 | -------------------- | ------------ | -------------------------------------------------------- |
@@ -678,7 +680,7 @@ services.api.port = 8080
 | --- | --- |
 | `command` | Shell command that starts the service, in a copy of the template. `{workdir}` is that copy. |
 | `port` | TCP port the service listens on, also the port the student's code uses. |
-| `env` | Environment variables of the service. It also gets `$CHALK_STUDENT`, `$CHALK_QUESTION` and `$CHALK_ASSIGNMENT`. |
+| `env` | Environment variables of the service. It also gets `$CHALK_STUDENT`, `$CHALK_QUESTION` and `$CHALK_QUIZ`. |
 | `start_timeout` | Seconds the service has to open its port (default 10). |
 
 A server in Python that checks one request:

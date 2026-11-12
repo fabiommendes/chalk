@@ -28,7 +28,7 @@ def run_script(tmp_path: Path, body: str):
     work = tmp_path / "work"
     work.mkdir()
     env = ChalkEnv(
-        answer="x", answer_path="answer.txt", question_id="q1", assignment_id="p1", student_id="s1"
+        answer="x", answer_path="answer.txt", question_id="q1", quiz_id="p1", student_id="s1"
     )
     return ScriptRunner(script, Repo(work), env=env, timeout=5).run(), work
 

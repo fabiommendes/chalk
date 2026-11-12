@@ -56,6 +56,7 @@ def check_bwrap() -> str:
     return bwrap
 
 
+# r2: adr-0005
 def bwrap_command(
     command: str,
     *,

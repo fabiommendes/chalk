@@ -394,6 +394,7 @@ def run_autograder(
             student=student,
             question=question,
             feedback=graded.feedback,
+            # r2: issue/chalk-autograde-all-apaga-os-ajustes-manuais
             adjustments=None,
             notes=graded.notes,
         )

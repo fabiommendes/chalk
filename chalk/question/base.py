@@ -298,7 +298,7 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
 
         return Task(
             question_id=self.id,
-            assignment_id=self.quiz.id,
+            quiz_id=self.quiz.id,
             root=self.root,
             template=self.get_template_path(),
         )

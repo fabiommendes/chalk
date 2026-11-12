@@ -343,7 +343,7 @@ class ChalkEnv:
     answer: str
     answer_path: str
     question_id: str
-    assignment_id: str
+    quiz_id: str
     student_id: str
     pass_env: tuple[str, ...] = ()
 
@@ -364,7 +364,8 @@ class ChalkEnv:
             "CHALK_ANSWER_CONTENT": self.answer,
             "CHALK_STUDENT": self.student_id,
             "CHALK_QUESTION": self.question_id,
-            "CHALK_ASSIGNMENT": self.assignment_id,
+            "CHALK_QUIZ": self.quiz_id,
+            "CHALK_ASSIGNMENT": self.quiz_id,  # deprecated alias of CHALK_QUIZ
         }
 
         for var in (*PASS_ENV, *self.pass_env):

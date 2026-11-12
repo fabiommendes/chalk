@@ -61,5 +61,6 @@ def dump_data(
         dest.write_bytes(source)
 
     elif hasattr(dest, "write"):
+        # r2: issue/escrita-em-stream-nao-distingue-texto-de-bytes
         # TODO: can we tell IO[str] from IO[bytes] in runtime?
         dest.write(source)  # type: ignore

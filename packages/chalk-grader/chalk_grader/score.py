@@ -36,6 +36,7 @@ FractionScore = NewType("FractionScore", Fraction)
 BoundScore = DecimalScore | FractionScore
 Numeric = Decimal | Fraction | int | float
 UnboundScore = Decimal | Fraction
+# r2: adr-0006
 Score = UnboundScore | BoundScore
 
 

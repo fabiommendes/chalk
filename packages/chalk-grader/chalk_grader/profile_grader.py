@@ -95,6 +95,7 @@ def builtin_profiles() -> dict[str, dict[str, Any]]:
     return tomllib.loads(text)
 
 
+# r2: adr-0003
 def resolve_profile(
     name: str, user: Mapping[str, Mapping[str, Any]] | None = None
 ) -> models.Profile:
@@ -158,6 +159,7 @@ class Prepared:
     tests: dict[TestKey, str]
 
 
+# r2: adr-0004
 @dataclass(frozen=True)
 class ProfileGrader(ScriptGrader):
     """
@@ -334,7 +336,8 @@ class ProfileGrader(ScriptGrader):
                 env={
                     "CHALK_STUDENT": env.student_id,
                     "CHALK_QUESTION": env.question_id,
-                    "CHALK_ASSIGNMENT": env.assignment_id,
+                    "CHALK_QUIZ": env.quiz_id,
+                    "CHALK_ASSIGNMENT": env.quiz_id,  # deprecated alias of CHALK_QUIZ
                 },
             )
             if (error := services.start()) is not None:
@@ -464,7 +467,7 @@ class ProfileGrader(ScriptGrader):
                 answer="",
                 answer_path=self._answer_path(),
                 question_id=self.task.question_id,
-                assignment_id=self.task.assignment_id,
+                quiz_id=self.task.quiz_id,
                 student_id="solution",
                 pass_env=tuple(self.conf.pass_env),
             ),

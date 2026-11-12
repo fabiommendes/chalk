@@ -21,7 +21,7 @@ def run_script(tmp_path: Path, body: str, *, timeout: float = 5, **env_kwargs):
         answer="x",
         answer_path="answer.txt",
         question_id="q1",
-        assignment_id="p1",
+        quiz_id="p1",
         student_id="s1",
         **env_kwargs,
     )

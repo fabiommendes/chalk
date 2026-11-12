@@ -121,6 +121,7 @@ def render_file_tree(
     )
 
 
+# r2: issue/arquivos-ocultos-em-chalk-show-detectados-so-pelo-ponto-inicial
 def _show_file(path: Path) -> bool:
     """
     Show the contents of a file in the console.
