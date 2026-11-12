@@ -1,7 +1,8 @@
 # Organização dos comandos
 
-Proposta de reorganização da CLI. Substitui `design/commands.md`, que
-descrevia uma árvore que nunca foi implementada.
+Reorganização da CLI, implementada em 2026-11-12 (d9c1622, 4b5e39c,
+35e9d7a). Substitui `design/commands.md`, que descrevia uma árvore que nunca
+foi implementada.
 
 ## Problema
 
@@ -96,6 +97,7 @@ Flags comuns: `-f`, `-o`, `-s`, `--color`, `--total/--no-total`, `--final`.
 - `--student ID` substitui `-a ID` (a letra `-a` fica para `--all`). Com
   `--answers` ou sozinho, mostra a resposta do aluno; com `-g`, a nota dele.
 - `--answers` herda os formatos do `collect` (`yaml`, `json`, `csv`, `md`).
+  O padrão passa a ser `md`, mais legível no terminal.
 - `--roster` herda o `-s` do `roster show` (`id`, `name`, `email`, `github`,
   com prefixo `-` para ordem decrescente).
 - `-f json` ou `-f yaml` sem `LOC` produz a estrutura que hoje sai de
@@ -104,17 +106,23 @@ Flags comuns: `-f`, `-o`, `-s`, `--color`, `--total/--no-total`, `--final`.
 ## Outros comandos
 
 - `info`: mostra versão do chalk e das dependências. `--debug` acrescenta
-  caminhos e variáveis de ambiente. Sai `-c`. `--version` deixa de ter `-v`.
+  caminhos e variáveis de ambiente (chaves e tokens aparecem só como
+  `<set>`). Saem `-c` e `--version`, que repetia o padrão.
 - `autograde LOC`: troca `QUIZ [QUESTION]` por `LOC`.
   - `--run` e `--run-script` viram um só `--run`: roda o script, mostra a
-    saída e não salva nada. Hoje `--run` sem `-r` é ignorado.
+    saída e não salva nada. A saída é capturada e impressa linha a linha,
+    como no antigo `-r`; o modo sem captura sai, porque a nota depende da
+    captura.
   - `--dry-run` passa a `-n`.
   - `--timeout`, `--keep-files` e `--keep-failed` ficam só na forma longa.
   - Corrigir a ajuda de `--limit`: limita o número de alunos, não há lote.
 - `grade LOC`: sai `--force`, que não é usado; fica `-a/--all`.
 - `extract LOC`: `--force` e `--ext` só na forma longa.
-- `clear`: `--autograder` só na forma longa. A descrição deve deixar claro que
-  `--all` apaga o roster.
+- `clear`: `--autograder` só na forma longa. Apaga o cache dos perfis
+  (`.chalk/cache`); antes só imprimia pastas `tmp-*` que nada cria. `--all`
+  por ora faz o mesmo. Roster, quizzes, submissões e notas nunca saem. Os
+  arquivos de `--keep-files` ficam no tmp do sistema, sem separação por
+  turma, e não são apagados.
 - `roster add`: `--name`, `--email` e `--github` só na forma longa (`-n`,
   `-e` e `-g` estão reservados ou disputados).
 - `roster import`: `-r/--replace` fica; `--keep` só na forma longa.
@@ -128,7 +136,8 @@ Flags comuns: `-f`, `-o`, `-s`, `--color`, `--total/--no-total`, `--final`.
   `id` do frontmatter e não têm `/`. `exam` fica: é o termo do codehood, não
   um quiz do chalk. `--dry-run` passa a `-n`. `--check GRADER` e
   `--try GRADER FILE` seguem como modos que dispensam o posicional.
-- `contrib --help` hoje quebra (`module 'chalk.contrib.__help' not found`).
+- `contrib --help` quebrava (`module 'chalk.contrib.__help' not found`);
+  agora mostra a ajuda e a lista de módulos.
 
 ## Documentação gerada
 
@@ -136,9 +145,11 @@ A referência de comandos sai do próprio código, para não divergir:
 
 - `typer chalk.cli utils docs --name chalk` gera Markdown com todos os
   comandos e flags. O arquivo fica em `docs/user-manual/cli.md`, versionado,
-  e um teste falha se o arquivo não bater com a saída do comando.
-- Typer não gera man pages. O `click-man` gera a partir do `click` que o Typer
-  usa por baixo. Fica como tarefa (`uv run task man`) que escreve em `man/`,
-  sem versionar a saída.
-- Os módulos de `contrib` são carregados sob demanda e não entram nos dois
-  formatos. `chalk contrib` sem argumento continua listando os módulos.
+  no menu do MkDocs como "Command reference". `uv run task cli-docs` regera, e
+  `tests/test_cli_docs.py` falha se o arquivo não bater com a saída do
+  comando.
+- Sem man pages. O `click-man` não acha o comando porque o Typer 0.26 embute a
+  própria cópia do click (`typer._click`), e um gerador nosso dependeria dessa
+  API privada. O `--help` e a página do manual cobrem o uso.
+- Os módulos de `contrib` são carregados sob demanda e não entram na
+  referência. `chalk contrib` sem argumento continua listando os módulos.
