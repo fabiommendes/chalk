@@ -376,15 +376,12 @@ def run_autograder(
         if graded is None:
             show("not graded.", style="yellow")
             continue
-        elif score is not None and graded.score != score:
+        if score is not None and graded.score != score:
             if is_score(score):
                 rich.print(rich_render_percent(score), end=" -> ")
             else:
                 rich.print(score, end=" -> ")
-            show(graded)
-            continue
-        else:
-            show(graded)
+        show(graded)
         if graded.notes:
             rich.print(Panel(graded.notes, title=f"Notes on {student.id}", style="yellow"))
 
@@ -394,8 +391,6 @@ def run_autograder(
             student=student,
             question=question,
             feedback=graded.feedback,
-            # r2: issue/chalk-autograde-all-apaga-os-ajustes-manuais
-            adjustments=None,
             notes=graded.notes,
         )
         if has_changed and not dry_run:

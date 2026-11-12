@@ -11,9 +11,10 @@ from types import SimpleNamespace
 import pytest
 import typer
 
-from chalk.cli.autograde_cmd import check_autograder
+from chalk.cli.autograde_cmd import check_autograder, run_autograder
 from chalk.core import Classroom, models
 from chalk.core import disqualification as dq
+from chalk.core.adjustment import Adjustment
 from chalk.core.grader import Graded
 from chalk.core.grades import load_grades_from_path, save_grades_to_path
 from chalk_grader.profile_grader import ProfileGrader
@@ -100,3 +101,34 @@ def test_question_with_unknown_profile(classroom: Path) -> None:
 
 def test_parse_build_error() -> None:
     assert dq.parse(str(dq.BuildError())) == dq.BuildError()
+
+
+class TestRegrade:
+    @pytest.fixture
+    def room(self, classroom: Path) -> Classroom:
+        conf = classroom / "p1" / "conf.yaml"
+        entry = (
+            "  - id: q3\n    autograder:\n      profile: regex\n"
+            "      match: [Outra]\n      reject: [x]\n"
+        )
+        conf.write_text(conf.read_text().replace("  - id: q3\n", entry))
+        return Classroom.load()
+
+    def response(self, room: Classroom) -> models.ResponseGrade:
+        return room.get_quiz("p1").grades._grades["0001"].responses["q3"]
+
+    def test_keeps_manual_adjustments(self, room: Classroom) -> None:
+        quiz = room.get_quiz("p1")
+        adjustments = [Adjustment(absolute=1, reason="points_given")]
+        quiz.grades.set_score(
+            Fraction(1, 2), student="0001", question="q3", adjustments=adjustments
+        )
+        run_autograder(quiz.get_question("q3"), force_grading=True, dry_run=True)
+        assert self.response(room).adjustments == adjustments
+
+    def test_saves_a_changed_score(self, room: Classroom) -> None:
+        quiz = room.get_quiz("p1")
+        quiz.grades.set_score(Fraction(0), student="0001", question="q3")
+        quiz.grades.save()
+        run_autograder(quiz.get_question("q3"), force_grading=True)
+        assert self.response(Classroom.load()).score == Fraction(1, 2)
