@@ -34,7 +34,6 @@ def add(
         str | None,
         typer.Option(
             ...,
-            "-n",
             "--name",
             help="Student name",
         ),
@@ -43,7 +42,6 @@ def add(
         str | None,
         typer.Option(
             ...,
-            "-e",
             "--email",
             help="Student email",
         ),
@@ -52,7 +50,6 @@ def add(
         str | None,
         typer.Option(
             ...,
-            "-g",
             "--github",
             help="Student GitHub username",
         ),
@@ -136,7 +133,6 @@ def import_roster(
         bool,
         typer.Option(
             ...,
-            "-k",
             "--keep",
             help="Keep existing students on conflicts",
         ),
@@ -175,7 +171,6 @@ def validate(
         str | None,
         typer.Option(
             ...,
-            "-f",
             "--fields",
             help="Comma-separated required fields",
         ),
@@ -184,9 +179,8 @@ def validate(
         str | None,
         typer.Option(
             ...,
-            "-a",
             "--quiz",
-            metavar="ASSIGNMENT",
+            metavar="QUIZ",
             help="Validate that all students have submissions for the specified quiz",
         ),
     ] = None,
@@ -195,7 +189,8 @@ def validate(
         typer.Option(
             ...,
             "--yes/--no",
-            help="Automatically answer yes or no to all prompts during validation",
+            "-y",
+            help="Answer yes (or no) to every prompt of the validation.",
         ),
     ] = None,
 ) -> None:

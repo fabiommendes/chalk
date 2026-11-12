@@ -50,7 +50,7 @@ turma/
 ## Comando
 
 ```
-chalk codehood autograde --exam <slug> [--question <slug>] [--dry-run]
+chalk codehood autograde <exam>[/<question>] [-n/--dry-run]
                          [--server <url>] [--key-file <arquivo>]
 ```
 

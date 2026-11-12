@@ -715,7 +715,7 @@ Services need the bwrap sandbox.
 Before grading the class, run the grader on the reference solution:
 
 ```sh
-chalk autograde final-exam q1 --check
+chalk autograde final-exam/q1 --check
 ```
 
 It grades `solution/` (or `answer_key.*` for text questions), shows the

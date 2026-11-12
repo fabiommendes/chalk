@@ -47,17 +47,16 @@ def grades(
 @app.command(name="autograde")
 @safe
 def autograde(
-    exam: Annotated[
+    loc: Annotated[
         str | None,
-        typer.Option("--exam", metavar="SLUG", help="Exam whose answers are graded."),
-    ] = None,
-    question: Annotated[
-        str | None,
-        typer.Option("--question", metavar="SLUG", help="Grade only this question of the exam."),
+        typer.Argument(
+            metavar="EXAM[/QUESTION]",
+            help="Slug of the exam, and optionally of one of its questions.",
+        ),
     ] = None,
     dry_run: Annotated[
         bool,
-        typer.Option("--dry-run", help="Grade, but write nothing; show the distribution."),
+        typer.Option("--dry-run", "-n", help="Grade, but write nothing; show the distribution."),
     ] = False,
     server: Annotated[
         str | None,
@@ -101,8 +100,9 @@ def autograde(
     elif try_ is not None:
         run_try(root, *try_)
     else:
-        if exam is None:
-            raise typer.BadParameter("--exam is required", param_hint="--exam")
+        if loc is None:
+            raise typer.BadParameter("missing EXAM (or --check, --try)", param_hint="EXAM")
+        exam, _, question = loc.partition("/")
         run_autograde(
-            root, exam, question=question, dry_run=dry_run, server=server, key_file=key_file
+            root, exam, question=question or None, dry_run=dry_run, server=server, key_file=key_file
         )

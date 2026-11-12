@@ -37,7 +37,9 @@ def contrib(
     """
     Load a contrib module.
     """
-    if not module:
+    if not module or module in ("--help", "-h"):
+        if module:
+            rich.print(ctx.get_help(), end="\n\n")
         list_contrib_modules()
         return
 

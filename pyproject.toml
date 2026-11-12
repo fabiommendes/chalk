@@ -55,6 +55,7 @@ test = "pytest tests"
 lint = "ruff check ."
 check = { cmd = "ruff check . && pytest -q tests && mkdocs build --strict -q", help = "Lint, tests and docs: run before every commit" }
 build = "uv build"
+cli-docs = { cmd = "typer chalk.cli utils docs --name chalk --title \"Command reference\" --output docs/user-manual/cli.md", help = "Regenerate docs/user-manual/cli.md from the CLI" }
 
 [tool.uv.build-backend]
 module-name = "chalk"

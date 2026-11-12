@@ -27,27 +27,18 @@ def add_autograde_command(app: typer.Typer) -> None:
 
 @safe
 def autograde(
-    quiz_id: Annotated[
+    loc: Annotated[
         str,
         typer.Argument(
             ...,
-            metavar="ASSIGNMENT",
-            help="Quiz identifier (e.g. 'hw1', 'exam1', etc.)",
+            metavar="LOC",
+            help="Quiz/question (e.g. 'p1/q1'). With only the quiz, asks for the question.",
         ),
     ],
-    question_id: Annotated[
-        str | None,
-        typer.Argument(
-            ...,
-            metavar="QUESTION",
-            help="Question identifier",
-        ),
-    ] = None,
     timeout: Annotated[
         float | None,
         typer.Option(
             ...,
-            "-t",
             "--timeout",
             metavar="SECONDS",
             help=(
@@ -69,7 +60,7 @@ def autograde(
         bool,
         typer.Option(
             ...,
-            "-d",
+            "-n",
             "--dry-run",
             help="Simulate the grading process without making any changes to grades or feedback",
         ),
@@ -78,7 +69,6 @@ def autograde(
         bool,
         typer.Option(
             ...,
-            "-k",
             "--keep-files",
             help="Keep temporary files generated during grading (for debugging)",
         ),
@@ -97,7 +87,7 @@ def autograde(
             ...,
             "--limit",
             metavar="N",
-            help="Limit the number of students to grade per batch",
+            help="Grade only the first N students of the roster",
         ),
     ] = None,
     force_grading: Annotated[
@@ -156,21 +146,12 @@ def autograde(
             help="Show detailed output during the grading process",
         ),
     ] = False,
-    run_script: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            "-r",
-            "--run-script",
-            help="Only run the autograder script without saving grades or feedback",
-        ),
-    ] = False,
     run: Annotated[
         bool,
         typer.Option(
             ...,
             "--run",
-            help="Only run the script and do not save grades or feedback.",
+            help="Run the autograder for each student and show its output. Saves nothing.",
         ),
     ] = False,
     check: Annotated[
@@ -189,10 +170,9 @@ def autograde(
     Run the autograder for the specified quiz and question.
     """
 
-    cls = Classroom.load()
-    quiz = cls.get_quiz(quiz_id)
-    if quiz is None:
-        raise typer.BadParameter(f"Quiz '{quiz_id}' not found.")
+    cls, quiz, question = Classroom.from_prompt(loc, check_exist=True)
+    if question is None:
+        question = cls.prompt_question(quiz, None)
 
     if student_id is not None:
         students = [cls.prompt_student(student_id, fuzzy=True)]
@@ -202,12 +182,10 @@ def autograde(
             students = students[:limit]
 
     if check:
-        question = cls.prompt_question(quiz, question_id)
         check_autograder(question, timeout=timeout, keep_files=keep_files)
         return
 
-    if run_script:
-        question = cls.prompt_question(quiz, question_id)
+    if run:
         if sort:
             raise typer.BadParameter("There is nothing to sort", param_hint=["--sort", "-s"])
         if output_format:
@@ -221,11 +199,9 @@ def autograde(
             keep_files=keep_files,
             verbose=verbose,
             timeout=timeout,
-            capture_output=not run,
         )
 
     else:
-        question = cls.prompt_question(quiz, question_id)
         run_autograder(
             question,
             students=students,

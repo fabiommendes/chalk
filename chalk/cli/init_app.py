@@ -32,7 +32,6 @@ def init(
         str | None,
         typer.Option(
             ...,
-            "-t",
             "--teacher",
             help="Teacher's name",
         ),

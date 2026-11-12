@@ -202,7 +202,7 @@ class TestSelection:
         (manual,) = server.add_attempt("manual", "p1", [(SLUG, CORRECT, M)])
         (skip,) = server.add_attempt("skip", "p1", [(SLUG, CORRECT, W)])
 
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
 
         assert result.exit_code == 0, result.output
         assert {sid for sid, _ in server.puts} == {ana, auto}
@@ -215,7 +215,7 @@ class TestSelection:
         old, new = server.add_attempt(
             "bia", "p1", [(SLUG, CORRECT, "PENDING_GRADE"), (SLUG, WRONG, "PENDING_GRADE")]
         )
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
         assert [sid for sid, _ in server.puts] == [new]
         assert server.fraction(new) == Fraction(1, 2)
         assert old not in server.feedback
@@ -227,7 +227,7 @@ class TestSelection:
             "caio", "p1", [(SLUG, CORRECT, "PENDING_GRADE")], closed=False
         )
         (closed,) = server.add_attempt("dani", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
         assert [sid for sid, _ in server.puts] == [closed]
         assert open_ not in server.feedback
 
@@ -238,7 +238,7 @@ class TestSelection:
         server.add_feedback(human, "ada", "1", grader="ada")
         (plain,) = server.add_attempt("fabi", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
 
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
 
         assert result.exit_code == 0, result.output
         assert [sid for sid, _ in server.puts] == [plain]
@@ -253,7 +253,7 @@ class TestSelection:
             "gabi", "p1", [(SLUG, WRONG, "PENDING_GRADE"), (SLUG, CORRECT, "PENDING_GRADE")]
         )
         server.add_feedback(old, "ada", "0", grader="ada")
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
         assert [sid for sid, _ in server.puts] == [new]
 
     def test_questions_without_grader_are_skipped_without_error(self, course, server) -> None:
@@ -263,7 +263,7 @@ class TestSelection:
             "hugo", "p1", [("manual-question", "texto", "PENDING_GRADE")]
         )
         (code,) = server.add_attempt("iris", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert result.exit_code == 0, result.output
         assert [sid for sid, _ in server.puts] == [code]
         assert manual not in server.feedback
@@ -275,7 +275,7 @@ class TestSelection:
         (a, b) = server.add_attempt(
             "joao", "p1", [(SLUG, CORRECT, "PENDING_GRADE"), ("other-q", CORRECT, "PENDING_GRADE")]
         )
-        autograde(server, "--exam", "p1", "--question", "other-q")
+        autograde(server, "p1/other-q")
         assert [sid for sid, _ in server.puts] == [b]
         assert a not in server.feedback
 
@@ -285,7 +285,7 @@ class TestSelection:
         server.add_exam("p2", [SLUG])
         (p1,) = server.add_attempt("kai", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
         (p2,) = server.add_attempt("kai", "p2", [(SLUG, CORRECT, "PENDING_GRADE")])
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
         assert [sid for sid, _ in server.puts] == [p1]
         assert p2 not in server.feedback
 
@@ -299,7 +299,7 @@ class TestWriting:
         add_question(course, **question)
         server.add_exam("p1", [SLUG])
         (sid,) = server.add_attempt("lia", "p1", [(SLUG, answer, "PENDING_GRADE")])
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert result.exit_code == 0, result.output
         return sid, server.written(sid)
 
@@ -324,7 +324,7 @@ class TestWriting:
         server.add_exam("p1", [SLUG])
         server.add_attempt("ana", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
         server.add_attempt("bia", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
         refs = {body["ref"] for _, body in server.puts}
         assert len(refs) == 1
         assert re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", refs.pop())
@@ -337,14 +337,14 @@ class TestWriting:
         add_question(course)
         server.add_exam("p1", [SLUG])
         (sid,) = server.add_attempt("mia", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
         first = server.written(sid)["ref"]
         assert server.fraction(sid) == Fraction(1, 2)
 
         # With only fat5 in the tests, the same answer now scores 0.
         only_fat5 = "\n".join(line for line in TESTS.splitlines() if "inverso" not in line)
         add_question(course, tests=only_fat5 + "\n")
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
 
         assert len(server.puts) == 2
         assert list(server.feedback[sid]) == [first]
@@ -377,7 +377,7 @@ class TestWriting:
         write(course / "graders/logico/aritmetica/fatorial-com-is/score.py", "raise SystemExit(2)")
         server.add_exam("p1", [SLUG])
         (sid,) = server.add_attempt("lia", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
-        autograde(server, "--exam", "p1")
+        autograde(server, "p1")
         assert sid not in server.feedback
 
     def test_timeout_writes_zero(self, course, server) -> None:
@@ -394,7 +394,7 @@ class TestDryRun:
         server.add_exam("p1", [SLUG])
         server.add_attempt("ana", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
         server.add_attempt("bia", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
-        result = autograde(server, "--exam", "p1", "--dry-run")
+        result = autograde(server, "p1", "--dry-run")
         assert result.exit_code == 0, result.output
         assert server.puts == []
         assert server.feedback == {}
@@ -404,7 +404,7 @@ class TestDryRun:
         add_question(course)
         server.add_exam("p1", [SLUG])
         server.add_attempt("ana", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
-        autograde(server, "--exam", "p1", "--dry-run")
+        autograde(server, "p1", "--dry-run")
         assert any("/submission" in path for _, path, _ in server.requests)
 
 
@@ -422,7 +422,7 @@ class TestSafetyChecks:
         (bad, good) = server.add_attempt(
             "ana", "p1", [(SLUG, CORRECT, "PENDING_GRADE"), ("good-q", CORRECT, "PENDING_GRADE")]
         )
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert [sid for sid, _ in server.puts] == [good]
         assert bad not in server.feedback
         assert SLUG in result.output
@@ -433,7 +433,7 @@ class TestSafetyChecks:
         add_question(course, solution=NOT_LOADING)
         server.add_exam("p1", [SLUG])
         server.add_attempt("ana", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert server.puts == []
         assert SLUG in result.output
 
@@ -444,7 +444,7 @@ class TestSafetyChecks:
         (bad, good) = server.add_attempt(
             "ana", "p1", [(SLUG, CORRECT, "PENDING_GRADE"), ("good-q", CORRECT, "PENDING_GRADE")]
         )
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert [sid for sid, _ in server.puts] == [good]
         assert bad not in server.feedback
         assert "no-such-profile" in result.output
@@ -463,7 +463,7 @@ class TestServerAndKey:
 
     def test_key_from_the_environment(self, course, server) -> None:
         sid = self.prepare(course, server)
-        assert autograde(server, "--exam", "p1").exit_code == 0
+        assert autograde(server, "p1").exit_code == 0
         assert server.fraction(sid) == 1
 
     def test_key_from_a_file_with_a_trailing_newline(self, course, server, tmp_path) -> None:
@@ -478,7 +478,6 @@ class TestServerAndKey:
                 server.url,
                 "--key-file",
                 str(key),
-                "--exam",
                 "p1",
             ],
         )
@@ -491,7 +490,7 @@ class TestServerAndKey:
         write(course / "codehood.toml", text)
         result = CliRunner().invoke(
             app,
-            ["codehood", "autograde", "--exam", "p1"],
+            ["codehood", "autograde", "p1"],
             env={"CODEHOOD_BOT_KEY": server.token},
         )
         assert result.exit_code == 0, result.output
@@ -499,23 +498,21 @@ class TestServerAndKey:
 
     def test_missing_key_fails_before_touching_the_server(self, course, server) -> None:
         self.prepare(course, server)
-        result = CliRunner().invoke(
-            app, ["codehood", "autograde", "--server", server.url, "--exam", "p1"]
-        )
+        result = CliRunner().invoke(app, ["codehood", "autograde", "--server", server.url, "p1"])
         assert result.exit_code == 1
         assert "CODEHOOD_BOT_KEY" in result.output
         assert server.requests == []
 
     def test_wrong_key_writes_nothing_and_fails(self, course, server) -> None:
         self.prepare(course, server)
-        result = autograde(server, "--exam", "p1", key="wrong")
+        result = autograde(server, "p1", key="wrong")
         assert result.exit_code == 1
         assert [m for m, *_ in server.requests] != []  # it did try
         assert server.puts == [] and server.feedback == {}
 
     def test_the_key_never_appears_in_the_output(self, course, server) -> None:
         self.prepare(course, server)
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert result.exit_code == 0, result.output
         assert server.token not in result.output
 

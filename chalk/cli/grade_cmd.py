@@ -48,14 +48,6 @@ def grade(
             ),
         ),
     ] = None,
-    force: Annotated[
-        bool,
-        typer.Option(
-            "--force",
-            "-f",
-            help="Force regrading even if responses already have grades",
-        ),
-    ] = False,
     all: Annotated[
         bool,
         typer.Option(

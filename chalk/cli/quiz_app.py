@@ -33,7 +33,6 @@ def create(
         str | None,
         typer.Option(
             ...,
-            "-n",
             "--name",
             help="Quiz name",
         ),

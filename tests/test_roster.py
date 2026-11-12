@@ -78,7 +78,7 @@ def test_init_writes_shared_header(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     from chalk.cli import app
 
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(app, ["init", "-c", "turma", "-t", "Professor"])
+    result = CliRunner().invoke(app, ["init", "-c", "turma", "--teacher", "Professor"])
     assert result.exit_code == 0, result.output
     header = (tmp_path / "roster.csv").read_text()
     assert header == "school_id,username,name,email,github,status\n"

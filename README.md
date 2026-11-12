@@ -29,7 +29,7 @@ Getting started
 chalk init                          # creates chalk.toml and roster.csv
 chalk quiz create p1 --questions 3  # creates p1/conf.yaml
 # write the questions in p1/questions/ and the answers in p1/submissions.csv
-chalk autograde p1 q1               # grades q1 with its answer key
+chalk autograde p1/q1               # grades q1 with its answer key
 chalk grade p1/q3                   # grades q3 by hand
 chalk show p1 --grades              # shows the grades table
 ```

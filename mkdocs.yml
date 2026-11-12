@@ -20,6 +20,7 @@ nav:
   - User Manual:
       - Overview: user-manual/index.md
       - Commands: user-manual/commands.md
+      - Command reference: user-manual/cli.md
       - Autograding scripts: user-manual/autograding-scripts.md
   - Developer Docs:
       - Overview: developer/index.md

@@ -16,8 +16,8 @@ def run(*args: str) -> str:
 
 @pytest.fixture
 def graded(classroom: Path) -> Path:
-    run("autograde", "p1", "q1", "--yes")
-    run("autograde", "p1", "q2", "--yes")
+    run("autograde", "p1/q1", "--yes")
+    run("autograde", "p1/q2", "--yes")
     return classroom
 
 

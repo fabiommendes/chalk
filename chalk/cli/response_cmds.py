@@ -40,7 +40,6 @@ def extract(
         str | None,
         typer.Option(
             ...,
-            "-e",
             "--ext",
             metavar="EXT",
             help="The extension to use for the exported files.",
@@ -50,7 +49,6 @@ def extract(
         bool,
         typer.Option(
             ...,
-            "-f",
             "--force",
             help="Force overwrite of existing files.",
         ),

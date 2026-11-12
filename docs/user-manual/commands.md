@@ -1,6 +1,7 @@
 # Commands
 
-Run `chalk COMMAND --help` for the options of each command.
+Run `chalk COMMAND --help` for the options of each command, or see the
+[command reference](cli.md).
 
 ```text
 chalk
@@ -59,7 +60,7 @@ profiles and writes the grades back through the REST API. Run it at the root
 of the course.
 
 ```text
-chalk codehood autograde --exam SLUG [--question SLUG] [--dry-run]
+chalk codehood autograde EXAM[/QUESTION] [-n/--dry-run]
                          [--server URL] [--key-file FILE]
 chalk codehood autograde --check GRADER
 chalk codehood autograde --try GRADER FILE
@@ -112,6 +113,6 @@ course/
   pending, listed as "manual" in the report.
 - An error of the infrastructure (sandbox, profile, prepare) writes nothing
   and appears in the report; the exit code is 1.
-- `--dry-run` writes nothing and prints the distribution of the scores.
+- `-n/--dry-run` writes nothing and prints the distribution of the scores.
 - `--check` grades the reference solution of a grader folder, and `--try`
   grades a local file. Neither needs a server or a key.

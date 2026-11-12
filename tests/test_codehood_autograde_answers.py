@@ -45,7 +45,7 @@ class TestFencedAnswers:
         server.add_exam("p1", [SLUG])
         answer = f"Minha solucao:\n\n```prolog\n{CORRECT}```\n\nEspero que esteja certo!\n"
         (sid,) = server.add_attempt("ana", "p1", [(SLUG, answer, "PENDING_GRADE")])
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert result.exit_code == 0, result.output
         assert server.fraction(sid) == 1
 
@@ -59,7 +59,7 @@ class TestOnBuildError:
         (broken, fine) = server.add_attempt(
             "bia", "p1", [(SLUG, NOT_LOADING, "PENDING_GRADE")]
         ) + server.add_attempt("caio", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert result.exit_code == 0, result.output
         assert [sid for sid, _ in server.puts] == [fine]
         assert broken not in server.feedback
@@ -70,7 +70,7 @@ class TestOnBuildError:
         add_question(course, grader_yaml=GRADER_YAML + f"on_build_error: {mode}\n")
         server.add_exam("p1", [SLUG])
         (sid,) = server.add_attempt("dani", "p1", [(SLUG, NOT_LOADING, "PENDING_GRADE")])
-        result = autograde(server, "--exam", "p1")
+        result = autograde(server, "p1")
         assert result.exit_code == 0, result.output
         assert server.fraction(sid) == Fraction(0)
         assert server.written(sid)["feedback"]
