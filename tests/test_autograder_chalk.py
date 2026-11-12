@@ -80,7 +80,9 @@ def test_question_uses_profile_from_chalk_toml(classroom: Path) -> None:
     conf = classroom / "p1" / "conf.yaml"
     entry = "  - id: q3\n    autograder:\n      profile: mine\n"
     conf.write_text(conf.read_text().replace("  - id: q3\n", entry))
-    grader = Classroom.load().get_quiz("p1").get_question("q3").get_grader()
+    # Keep the classroom alive: questions hold only weak references to it.
+    room = Classroom.load()
+    grader = room.get_quiz("p1").get_question("q3").get_grader()
     assert isinstance(grader, ProfileGrader)
     assert grader.name == "mine"
     assert grader.spec.env["X"] == "1"
@@ -91,7 +93,9 @@ def test_question_with_unknown_profile(classroom: Path) -> None:
     entry = "  - id: q3\n    autograder:\n      profile: nope\n"
     conf.write_text(conf.read_text().replace("  - id: q3\n", entry))
     with pytest.raises(ValueError, match="unknown profile"):
-        Classroom.load().get_quiz("p1").get_question("q3").get_grader()
+        # Keep the classroom alive: questions hold only weak references to it.
+        room = Classroom.load()
+        room.get_quiz("p1").get_question("q3").get_grader()
 
 
 def test_parse_build_error() -> None:

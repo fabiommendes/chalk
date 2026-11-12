@@ -1,8 +1,16 @@
+---
+type: rfc
+status: draft
+tags: [grading, sandbox, security]
+created: 2026-11-12
+creator: claude
+---
+
 # Modelo de segurança e sandbox do autograder
 
 Estado em 2026-11-02. Rascunho para discussão.
 
-Cenários em `design/historias-correcao.md`. Este documento cobre as duas
+Cenários em `dev/notes/classes-de-correcao.md` e `docs/user-stories/teacher.md`. Este documento cobre as duas
 classes de correção que rodam script: **dado** (a resposta é lida por um
 script do professor) e **código** (a resposta é executada). Objetiva (mdq)
 e manual não rodam script e ficam fora daqui.
@@ -451,7 +459,7 @@ questions:
    registro. Custa um bwrap e a cópia do template por serviço e por
    execução (cerca de 0,1 s mais o tempo de subida do servidor). Não há
    chave `network: services`: ter `services` no perfil basta. `python-pytest` e
-   `rust-cargo` viraram dados em `chalk/autograder/profiles.toml`, e um
+   `rust-cargo` viraram dados em `packages/chalk-grader/chalk_grader/profiles.toml`, e um
    único `ProfileGrader` executa qualquer perfil. Mudanças em relação ao
    desenho:
    - A lista de testes esperados vem do relatório JUnit de uma execução da
@@ -522,4 +530,3 @@ questions:
   `podman` é o segundo, para imagens próprias e rede `internal`.
 - O aluno não adiciona dependências. Vale só o lockfile do template.
 - Rede desligada por padrão; os outros modos são opção por questão.
-

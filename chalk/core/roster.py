@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 __all__ = ["Roster", "read_roster_like"]
 
 #: Columns of the roster file shared with codehood, in order. See
-#: design/mdq-e-roster.md.
+#: dev/adr/0001-questoes-em-mdq-e-roster-compartilhado-com-o-codehood.md.
 SHARED_COLUMNS = ["school_id", "username", "name", "email", "github", "status"]
 COLUMN_ORDER = ["id", *SHARED_COLUMNS, "age", "email_alt"]
 DEFAULT_ID_COLUMN = "school_id"

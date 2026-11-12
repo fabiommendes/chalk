@@ -58,6 +58,8 @@ class TestRegexProfile:
             "      match: [abc]\n      reject: [abd]\n"
         )
         conf.write_text(conf.read_text().replace("  - id: q3\n", entry))
-        grader = Classroom.load().get_quiz("p1").get_question("q3").get_grader()
+        # Keep the classroom alive: questions hold only weak references to it.
+        room = Classroom.load()
+        grader = room.get_quiz("p1").get_question("q3").get_grader()
         assert isinstance(grader, RegexAnswerGrader)
         assert grader("s1", "ab[c]").score == 1

@@ -1,4 +1,13 @@
-# Documento de design
+---
+type: note
+status: open
+kind: research
+tags: [scope]
+created: 2026-11-12
+creator: claude
+---
+
+# Escopo inicial do chalk
 
 ## Proposta inicial de organização
 
@@ -382,5 +391,3 @@ Não está ordenado por prioridade:
 * Detectar plágio.
 * Suporte a feedback qualitativo.
 * Mecanismos de envio de e-mails de feedback para os alunos.
-
-

@@ -1,6 +1,15 @@
-# Migração do chalk para codehood CLI e mdq
+---
+type: note
+status: open
+kind: pitch
+tags: [codehood, mdq]
+created: 2026-11-12
+creator: claude
+---
 
-> **Descontinuado.** Substituído por `design/mdq-e-roster.md`. O plano abaixo
+# Migração do chalk para codehood CLI e mdq (descontinuada)
+
+> **Descontinuado.** Substituído por `dev/adr/0001-questoes-em-mdq-e-roster-compartilhado-com-o-codehood.md`. O plano abaixo
 > propunha congelar o chalk e migrar tudo para o codehood. A decisão foi
 > outra: chalk e codehood convivem no mesmo repositório da turma, e o chalk
 > corrige o que acontece fora da plataforma. Fica aqui só como histórico.

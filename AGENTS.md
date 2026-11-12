@@ -6,13 +6,15 @@ CLI para corrigir quizzes e manter roster e notas em arquivos de texto. Ver
 ## Idioma
 
 Nível 2 (`~/git/tools/tooling-root/dev/adr/0002-idioma-dos-repositorios.md`):
-código, comentários, `README.md` e `docs/` em inglês; `AGENTS.md` e
-`design/` em português.
+código, comentários, `README.md`, `docs/` (inclusive `docs/user-stories/`)
+e `GLOSSARY.md` em inglês; `AGENTS.md` e tudo em `dev/` em português.
 
 ## Verificação
 
 ```sh
-uv run task check   # ruff, pytest e mkdocs --strict
+r2 check                          # = uv run task check: ruff, pytest e mkdocs --strict
+uv run pytest tests/test_x.py -k nome   # um teste
+uv run ruff format                # formatar
 ```
 
 Rode antes de cada commit. Testes ficam em `tests/` e usam a turma de exemplo
@@ -52,7 +54,7 @@ do motor; `chalk.core.score`, `chalk.core.grader`,
 ## Convivência com o codehood
 
 Uma turma pode ser ao mesmo tempo projeto chalk e curso codehood. Regras em
-`design/mdq-e-roster.md`:
+`dev/adr/0001-questoes-em-mdq-e-roster-compartilhado-com-o-codehood.md`:
 
 - O chalk lê `codehood.toml`, `questions/`, `exams/` e `graders/` do curso e
   fala com a REST do codehood, só para `chalk codehood autograde` (chave `BOT`

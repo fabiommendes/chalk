@@ -1,4 +1,12 @@
-# Organização dos comandos
+---
+type: spec
+status: active
+tags: [cli]
+created: 2026-11-12
+creator: claude
+---
+
+# Organização dos comandos da CLI
 
 Reorganização da CLI, implementada em 2026-11-12 (d9c1622, 4b5e39c,
 35e9d7a). Substituiu `design/commands.md` (removido), que descrevia uma árvore que nunca

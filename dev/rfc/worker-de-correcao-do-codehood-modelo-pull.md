@@ -1,6 +1,14 @@
+---
+type: rfc
+status: draft
+tags: [grading, codehood, worker]
+created: 2026-11-12
+creator: claude
+---
+
 # Worker de correção do codehood (modelo pull)
 
-Estado em 2026-11-12. Rascunho. Parte de `design/codehood-autograde.md`, que
+Estado em 2026-11-12. Rascunho. Parte de `dev/spec/corrigir-respostas-do-codehood-com-o-autograder-do-chalk.md`, que
 corrige uma prova por comando.
 
 ## Problema

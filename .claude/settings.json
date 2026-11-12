@@ -1,0 +1,6 @@
+{
+  "env": {
+    "R2_AGENT": "1",
+    "R2_AUTHOR": "claude"
+  }
+}

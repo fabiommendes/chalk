@@ -1,3 +1,11 @@
+---
+type: spec
+status: active
+tags: [grading, codehood]
+created: 2026-11-12
+creator: claude
+---
+
 # Corrigir respostas do codehood com o autograder do chalk
 
 Estado em 2026-11-05. Rascunho. A parte do servidor está no codehood, em
@@ -9,12 +17,12 @@ No codehood, as questões de código (`[essay]` com `content: code`) só têm
 correção manual. Na Prova 1 de Paradigmas são 155 respostas de Prolog numa
 questão só. O servidor do codehood não executa código de aluno, e o chalk já
 tem o motor: perfis, sandbox `bwrap`, nota pela lista de testes da solução,
-guard e notas de suspeita (`design/sandbox.md`). Falta o caminho entre os
+guard e notas de suspeita (`dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md`). Falta o caminho entre os
 dois.
 
 ## Mudança na regra de convivência
 
-`AGENTS.md` e `design/mdq-e-roster.md` dizem que o chalk só toca o
+`AGENTS.md` e `dev/adr/0001-questoes-em-mdq-e-roster-compartilhado-com-o-codehood.md` dizem que o chalk só toca o
 `roster.csv` e o `grades.csv` do codehood. Esta proposta amplia a regra: o
 comando `chalk codehood autograde` também lê `codehood.toml`, `questions/`,
 `exams/` e `graders/` do curso, e fala com a REST do codehood. Os quizzes

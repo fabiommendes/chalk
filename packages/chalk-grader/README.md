@@ -24,4 +24,4 @@ grader = ProfileGrader(
 graded = grader("student-id", "module Main exposing (..)\n...")
 ```
 
-See `design/sandbox.md` in the chalk repository for the security model.
+See `dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md` in the chalk repository for the security model.

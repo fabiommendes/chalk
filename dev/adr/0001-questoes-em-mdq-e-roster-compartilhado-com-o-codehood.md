@@ -1,8 +1,17 @@
+---
+type: adr
+status: accepted
+tags: [mdq, codehood, roster]
+created: 2026-11-12
+decided: 2026-11-12
+creator: claude
+---
+
 # Questões em mdq e roster compartilhado com o codehood
 
 Estado em 2026-11-01. Contexto: chalk e codehood rodam no mesmo repositório
 da turma, cada um com as próprias configurações (ver a conversa que gerou
-`design/migracao-codehood-mdq.md`). O chalk corrige o que acontece fora da
+`dev/notes/migracao-do-chalk-para-codehood-cli-e-mdq-descontinuada.md`). O chalk corrige o que acontece fora da
 plataforma e entrega notas ao codehood pelo `grades.csv` da raiz.
 
 
@@ -32,7 +41,7 @@ uma pasta com `conf.yaml`. O único arquivo disputado é `roster.csv`.
 Exceção: `chalk codehood autograde` também lê `codehood.toml`, `questions/`,
 `exams/` e `graders/<caminho>/` (`grader.yaml`, `template/`, `solution/`) e
 fala com a REST do codehood. Só ele usa a API; os outros comandos seguem sem
-rede. Ver `design/codehood-autograde.md`.
+rede. Ver `dev/spec/corrigir-respostas-do-codehood-com-o-autograder-do-chalk.md`.
 
 
 ## Questões
@@ -46,7 +55,7 @@ rede. Ver `design/codehood-autograde.md`.
   sem entrada na lista vêm depois, em ordem natural de nome.
 - Uma questão que aparece em `conf.yaml` sem arquivo mdq é uma questão
   aberta: correção manual ou por autograder. Isso mantém a regra do
-  `escopo.md` de que questões começam sem tipo.
+  `dev/notes/escopo-inicial-do-chalk.md` de que questões começam sem tipo.
 - O tipo `repo` (resposta é um diretório) não existe no mdq e continua
   nativo do chalk, declarado em `conf.yaml` com `type: repo`.
 - `association` sai até o mdq ter o tipo matching.
