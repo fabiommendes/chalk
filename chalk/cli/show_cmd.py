@@ -294,7 +294,7 @@ def dump_answer(
 ):
     rich.print(f"[bold green]{question.quiz.name}, {question.name}[/]")
     max_grade = f"/[blue]{question.value}[/]" if question.value is not None else ""
-    rich.print(f"[dim]Grade: {opt.unwrap(grade, 'N/A')}[/]{max_grade}")
+    rich.print(f"[dim]Grade: {opt.unwrap(grade, 'NA')}[/]{max_grade}")
     if answer is None:
         rich.print("[yellow]No answer found for this question.[/]", file=sys.stderr)
         raise typer.Exit(1)

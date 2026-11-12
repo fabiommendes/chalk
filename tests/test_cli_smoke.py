@@ -40,7 +40,7 @@ COMMANDS = [
     "quiz create p2 --name P2 --questions 3",
     "contrib",
     "contrib --help",
-    "clear --autograder",
+    "clear",
     "contrib github.classroom --help",
     "contrib github.roster --help",
     "contrib github.repo-submissions --help",

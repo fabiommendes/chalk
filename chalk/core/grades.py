@@ -16,6 +16,7 @@ from typing import (
     cast,
     overload,
 )
+from warnings import deprecated
 from weakref import ref
 
 import opt
@@ -25,7 +26,7 @@ from pydantic_core import InitErrorDetails
 from rich.console import Console, RenderableType
 
 from ..data.protocols import get_id
-from ..table import Table, deprecated
+from ..table import Table
 from ..util import unpack
 from ..util.dataframe import ALL_STATS, DEFAULT_STATS, Stats, grades_dataframe_stats
 from . import models

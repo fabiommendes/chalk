@@ -1,7 +1,7 @@
 # Organização dos comandos
 
 Reorganização da CLI, implementada em 2026-11-12 (d9c1622, 4b5e39c,
-35e9d7a). Substitui `design/commands.md`, que descrevia uma árvore que nunca
+35e9d7a). Substituiu `design/commands.md` (removido), que descrevia uma árvore que nunca
 foi implementada.
 
 ## Problema
@@ -118,9 +118,9 @@ Flags comuns: `-f`, `-o`, `-s`, `--color`, `--total/--no-total`, `--final`.
   - Corrigir a ajuda de `--limit`: limita o número de alunos, não há lote.
 - `grade LOC`: sai `--force`, que não é usado; fica `-a/--all`.
 - `extract LOC`: `--force` e `--ext` só na forma longa.
-- `clear`: `--autograder` só na forma longa. Apaga o cache dos perfis
-  (`.chalk/cache`); antes só imprimia pastas `tmp-*` que nada cria. `--all`
-  por ora faz o mesmo. Roster, quizzes, submissões e notas nunca saem. Os
+- `clear`: sem opções. Apaga o cache dos perfis (`.chalk/cache`); antes só
+  imprimia pastas `tmp-*` que nada cria, e `--all` e `--autograder` faziam
+  a mesma coisa. Uma opção volta quando houver outra coisa a apagar. Roster, quizzes, submissões e notas nunca saem. Os
   arquivos de `--keep-files` ficam no tmp do sistema, sem separação por
   turma, e não são apagados.
 - `roster add`: `--name`, `--email` e `--github` só na forma longa (`-n`,

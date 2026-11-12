@@ -12,7 +12,6 @@ from typing import (
     cast,
     overload,
 )
-from warnings import deprecated
 
 import natsort
 import numpy as np
@@ -202,15 +201,17 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
             case "table":
                 with as_stream(file) as f:
                     with redirect_stdout(f):
-                        self.print(
-                            styles=styles,
-                            names=names,
-                            align=align,
-                            sort=sort,
-                            reverse=reverse,
-                            render=render,
-                            empty=empty,
-                            extra_rows=extra_rows,
+                        rich.print(
+                            self.render(
+                                styles=styles,
+                                names=names,
+                                align=align,
+                                sort=sort,
+                                reverse=reverse,
+                                render=render,
+                                empty=empty,
+                                extra_rows=extra_rows,
+                            )
                         )
 
             case "csv":
@@ -231,36 +232,6 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
             case _:
                 msg = f"{format.upper()} output is not supported"
                 raise ValueError(msg)
-
-    @deprecated("Use rich.print(table.render()) instead.")
-    def print(
-        self,
-        styles: None | dict[str, str] = None,
-        names: None | dict[str, str] = None,
-        align: None | dict[str, JustifyMethod] = None,
-        sort: str | None = None,
-        reverse: bool = False,
-        render: RenderFn | None = None,
-        title: str | None = None,
-        empty: RenderableType = Text.assemble(("Warning:", "bold yellow"), " no data to display!"),
-        extra_rows: Iterable[dict[str, Any]] | None = None,
-    ) -> None:
-        """
-        Render a table to the console using Rich.
-        """
-        rich.print(
-            self.render(
-                styles=styles,
-                names=names,
-                align=align,
-                sort=sort,
-                reverse=reverse,
-                render=render,
-                title=title,
-                empty=empty,
-                extra_rows=extra_rows,
-            )
-        )
 
     def render(
         self,
