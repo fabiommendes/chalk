@@ -20,6 +20,26 @@ Rode antes de cada commit. Testes ficam em `tests/` e usam a turma de exemplo
 a turma para um diretório temporário). `tests/test_cli_smoke.py` roda todo
 comando não interativo; comando novo entra na lista.
 
+Os testes com `bwrap` (sandbox do motor) são pulados dentro do sandbox do
+Claude Code ("bwrap cannot create a sandbox here"). Quem mexe no motor roda
+`uv run pytest packages/chalk-grader/tests` fora dele.
+
+## Pacotes
+
+Workspace uv com dois pacotes:
+
+- `chalk` (raiz): quizzes, roster, notas, CLI.
+- `chalk-grader` (`packages/chalk-grader/`, `import chalk_grader`): o motor de
+  correção (perfis, sandbox, `ProfileGrader`, scoring, guard). Dependência
+  comum do chalk e do `codehood-worker`. Não importa nada do chalk; testes em
+  `packages/chalk-grader/tests/`, sem a turma de exemplo.
+
+O chalk passa a questão para o motor como `chalk_grader.task.Task`
+(`BaseQuestion.get_task`). `Score`, `Graded`, os motivos simples de
+desclassificação e os modelos `Autograder`/`Profile`/`Limits`/`Service` são
+do motor; `chalk.core.score`, `chalk.core.grader`,
+`chalk.core.disqualification` e `chalk.core.models` os reexportam.
+
 ## Dependências irmãs
 
 - `mdq` vem do checkout local `../../codehood/mdq/mdq-py` (`[tool.uv.sources]`

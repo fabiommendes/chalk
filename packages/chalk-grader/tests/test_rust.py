@@ -2,15 +2,15 @@ import shutil
 import subprocess
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from test_sandbox import needs_bwrap
 
-from chalk.autograder.profile_grader import ProfileGrader, resolve_profile
-from chalk.autograder.profiles import PrepareError
-from chalk.core import disqualification as dq
-from chalk.core import models
-from tests.test_autograder_sandbox import needs_bwrap
+from chalk_grader import disqualification as dq
+from chalk_grader import models
+from chalk_grader.profile_grader import ProfileGrader, resolve_profile
+from chalk_grader.profiles import PrepareError
+from chalk_grader.task import Task
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which("cargo") and shutil.which("cargo-nextest")),
@@ -86,16 +86,11 @@ def crate(root: Path, lib: str, files: dict[str, str] | None = None) -> Path:
 
 
 def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> ProfileGrader:
-    question = SimpleNamespace(
-        id="q1",
-        quiz=SimpleNamespace(id="p1"),
-        root=template.parent,
-        get_template_path=lambda: template,
-    )
+    task = Task("q1", "p1", root=template.parent, template=template)
     conf = {"profile": "rust-cargo", "timeout": 120, **conf}
     return ProfileGrader(
         script=None,
-        question=question,  # type: ignore[arg-type]
+        task=task,
         conf=models.Autograder(**conf),
         name="rust-cargo",
         profile=resolve_profile("rust-cargo"),
@@ -180,7 +175,3 @@ class TestWithSandbox(Cases):
             files,
         )
         assert self.grade(template, cache, solution, root).score == Fraction(1, 4)
-
-
-def test_parse_build_error() -> None:
-    assert dq.parse(str(dq.BuildError())) == dq.BuildError()

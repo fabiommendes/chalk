@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from chalk.autograder.repo import Repo
-from chalk.autograder.result_extractor import extract_result_from_file
-from chalk.autograder.script_runner import ChalkEnv, ScriptRunner
-from chalk.core import disqualification as dq
+from chalk_grader import disqualification as dq
+from chalk_grader.repo import Repo
+from chalk_grader.result_extractor import extract_result_from_file
+from chalk_grader.script_runner import ChalkEnv, ScriptRunner
 
 JUNIT = """<?xml version="1.0" encoding="utf-8"?>
 <testsuites>
@@ -28,7 +28,7 @@ def run_script(tmp_path: Path, body: str):
     work = tmp_path / "work"
     work.mkdir()
     env = ChalkEnv(
-        answer="x", answer_path="answer.txt", question_id="q1", quiz_id="p1", student_id="s1"
+        answer="x", answer_path="answer.txt", question_id="q1", assignment_id="p1", student_id="s1"
     )
     return ScriptRunner(script, Repo(work), env=env, timeout=5).run(), work
 

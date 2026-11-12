@@ -46,9 +46,9 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
-from ..core import disqualification as dq
-from ..core import models
-from ..core.grader import DEFAULT_TIMEOUT, Graded
+from . import disqualification as dq
+from . import models
+from .graded import DEFAULT_TIMEOUT, Graded
 from .profiles import (
     PrepareError,
     TestKey,
@@ -169,6 +169,7 @@ class ProfileGrader(ScriptGrader):
     #: Reference solution: a directory for repository questions or the text
     #: of the answer for textual ones.
     solution: str | Path | None = None
+    #: Defaults to .chalk/cache in the task root.
     cache_dir: Path | None = None
     #: Holds the result of prepare(), which runs once per grader.
     _prepared: list[Prepared] = field(default_factory=list, compare=False, repr=False)
@@ -256,7 +257,7 @@ class ProfileGrader(ScriptGrader):
 
     def _reader(self, prepared: Prepared) -> Reader:
         expected = prepared.tests
-        scorer = make_scorer(self.conf, self.question.root)
+        scorer = make_scorer(self.conf, self.task.root)
         if self.spec.report == "stdio":
             template = self._template()
             mode = prepared.variables.get("compare", "lines")
@@ -333,7 +334,7 @@ class ProfileGrader(ScriptGrader):
                 env={
                     "CHALK_STUDENT": env.student_id,
                     "CHALK_QUESTION": env.question_id,
-                    "CHALK_ASSIGNMENT": env.quiz_id,
+                    "CHALK_ASSIGNMENT": env.assignment_id,
                 },
             )
             if (error := services.start()) is not None:
@@ -462,8 +463,8 @@ class ProfileGrader(ScriptGrader):
             env=ChalkEnv(
                 answer="",
                 answer_path=self._answer_path(),
-                question_id=self.question.id,
-                quiz_id=self.question.quiz.id,
+                question_id=self.task.question_id,
+                assignment_id=self.task.assignment_id,
                 student_id="solution",
                 pass_env=tuple(self.conf.pass_env),
             ),
@@ -494,7 +495,7 @@ class ProfileGrader(ScriptGrader):
         return " (add the reference solution to the question)" if self.solution is None else ""
 
     def _template(self) -> Path:
-        template = self.question.get_template_path()
+        template = self.task.template
         if template is None:
             raise PrepareError(f"the {self.name} profile needs a template directory")
         return template
@@ -503,10 +504,7 @@ class ProfileGrader(ScriptGrader):
         return [*self.tests, *self.spec.trusted]
 
     def _cache_root(self) -> Path:
-        if self.cache_dir is not None:
-            path = self.cache_dir
-        else:
-            path = self.question.quiz.classroom.root / ".chalk" / "cache"
+        path = self.cache_dir if self.cache_dir is not None else self.task.root / ".chalk" / "cache"
         path.mkdir(parents=True, exist_ok=True)
         return path
 

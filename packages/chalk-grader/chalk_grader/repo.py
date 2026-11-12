@@ -6,9 +6,6 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import gitignore
-from rich.console import RenderableType
-
-from ..util.show import render_file_tree
 
 log = getLogger(__name__)
 
@@ -254,9 +251,6 @@ class Repo:
         Remove repository from filesystem.
         """
         shutil.rmtree(self.root, ignore_errors=True)
-
-    def __rich__(self) -> RenderableType:
-        return render_file_tree(self.root)
 
 
 def always_false(x: Any, /) -> bool:

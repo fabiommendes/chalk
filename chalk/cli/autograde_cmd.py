@@ -394,7 +394,7 @@ def run_autograder(
             student=student,
             question=question,
             feedback=graded.feedback,
-            adjustments=graded.adjustments,
+            adjustments=None,
             notes=graded.notes,
         )
         if has_changed and not dry_run:

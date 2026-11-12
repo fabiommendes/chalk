@@ -6,22 +6,22 @@ scripts, which runs every step without a language toolchain.
 import os
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from test_sandbox import needs_bwrap
 
-from chalk.autograder.profile_grader import (
+from chalk_grader import disqualification as dq
+from chalk_grader import models
+from chalk_grader.profile_grader import (
     ProfileGrader,
     builtin_profiles,
     render,
     resolve_profile,
     seed_workdir,
 )
-from chalk.autograder.profiles import PrepareError
-from chalk.core import Classroom, models
-from chalk.core import disqualification as dq
-from tests.test_autograder_sandbox import needs_bwrap
+from chalk_grader.profiles import PrepareError
+from chalk_grader.task import Task
 
 RUNNER = """\
 echo '<testsuites><testsuite>'
@@ -77,15 +77,10 @@ def solution(tmp_path: Path) -> Path:
 
 
 def make_grader(template: Path, solution: Path | None, profiles=SHELL, **conf) -> ProfileGrader:
-    question = SimpleNamespace(
-        id="q1",
-        quiz=SimpleNamespace(id="p1"),
-        root=template.parent,
-        get_template_path=lambda: template,
-    )
+    task = Task("q1", "p1", root=template.parent, template=template)
     return ProfileGrader(
         script=None,
-        question=question,  # type: ignore[arg-type]
+        task=task,
         conf=models.Autograder(profile="shell-tests", timeout=30, **conf),
         name="shell-tests",
         profile=resolve_profile("shell-tests", profiles),
@@ -146,12 +141,6 @@ def test_seed_touches_student_files(tmp_path: Path) -> None:
     assert (root / "prog.sh").stat().st_mtime > 0
 
 
-def test_classroom_reads_profiles(classroom: Path) -> None:
-    with (classroom / "chalk.toml").open("a") as fd:
-        fd.write('\n[profiles.mine]\nextends = "python-pytest"\n')
-    assert Classroom.load(classroom).profiles == {"mine": {"extends": "python-pytest"}}
-
-
 class Cases:
     sandbox = "none"
 
@@ -205,23 +194,3 @@ class TestWithoutSandbox(Cases):
 @needs_bwrap
 class TestWithSandbox(Cases):
     sandbox = "bwrap"
-
-
-def test_question_uses_profile_from_chalk_toml(classroom: Path) -> None:
-    with (classroom / "chalk.toml").open("a") as fd:
-        fd.write('\n[profiles.mine]\nextends = "python-pytest"\nenv.X = "1"\n')
-    conf = classroom / "p1" / "conf.yaml"
-    entry = "  - id: q3\n    autograder:\n      profile: mine\n"
-    conf.write_text(conf.read_text().replace("  - id: q3\n", entry))
-    grader = Classroom.load().get_quiz("p1").get_question("q3").get_grader()
-    assert isinstance(grader, ProfileGrader)
-    assert grader.name == "mine"
-    assert grader.spec.env["X"] == "1"
-
-
-def test_question_with_unknown_profile(classroom: Path) -> None:
-    conf = classroom / "p1" / "conf.yaml"
-    entry = "  - id: q3\n    autograder:\n      profile: nope\n"
-    conf.write_text(conf.read_text().replace("  - id: q3\n", entry))
-    with pytest.raises(ValueError, match="unknown profile"):
-        Classroom.load().get_quiz("p1").get_question("q3").get_grader()

@@ -32,6 +32,8 @@ from ..util import unpack
 from .renderable import RenderableQuestion
 
 if TYPE_CHECKING:
+    from chalk_grader.task import Task
+
     from ..core.classroom import Classroom
     from ..core.quiz import Quiz
     from ..question import Question
@@ -288,6 +290,19 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             return None
         return path
 
+    def get_task(self) -> Task:
+        """
+        The question as seen by chalk_grader.
+        """
+        from chalk_grader.task import Task
+
+        return Task(
+            question_id=self.id,
+            assignment_id=self.quiz.id,
+            root=self.root,
+            template=self.get_template_path(),
+        )
+
     def get_profile_grader(self) -> Grader[Any] | None:
         """
         Grader of the autograder profile that does not run a script, if the
@@ -300,15 +315,16 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             return RegexAnswerGrader(conf)
         if conf.profile in (None, "script"):
             return None
-        from ..autograder.profile_grader import ProfileGrader, resolve_profile
+        from chalk_grader.profile_grader import ProfileGrader, resolve_profile
 
         return ProfileGrader(
             script=None,
-            question=self,
+            task=self.get_task(),
             conf=conf,
             name=conf.profile,
             profile=resolve_profile(conf.profile, self.quiz.classroom.profiles),
             solution=self._profile_solution(),
+            cache_dir=self.quiz.classroom.root / ".chalk" / "cache",
         )
 
     def get_reference_answer(self) -> Answer | None:

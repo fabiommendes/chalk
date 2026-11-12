@@ -13,8 +13,8 @@ from fractions import Fraction
 from logging import getLogger
 from pathlib import Path
 
-from ..core import disqualification as dq
-from ..core.grader import Graded
+from . import disqualification as dq
+from .graded import Graded
 from .result_extractor import MAX_RESULT_SIZE
 from .scoring import Scorer, ScoringError
 

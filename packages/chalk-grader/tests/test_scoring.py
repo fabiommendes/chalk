@@ -13,13 +13,12 @@ from pathlib import Path
 
 import pydantic
 import pytest
+from test_more_profiles import grader, make_tree
+from test_prolog import CORRECT, TESTS, WRONG
 
-from chalk.autograder import scoring
-from chalk.autograder.profiles import score_report
-from chalk.core import disqualification as dq
-from chalk.core import models
-from tests.test_autograder_more_profiles import grader, make_tree
-from tests.test_autograder_prolog import CORRECT, TESTS, WRONG
+from chalk_grader import disqualification as dq
+from chalk_grader import models, scoring
+from chalk_grader.profiles import score_report
 
 needs_swipl = pytest.mark.skipif(not shutil.which("swipl"), reason="swipl is needed")
 

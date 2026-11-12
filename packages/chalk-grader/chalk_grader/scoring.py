@@ -19,7 +19,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from ..core import models
+from . import models
 
 __all__ = ["SCRIPT_TIMEOUT", "ScoringError", "ScriptScorer", "all_or_nothing", "make_scorer"]
 

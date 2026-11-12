@@ -575,7 +575,7 @@ disqualified with `Error` (the message has the stderr of the script), and
 ## Custom profiles
 
 The built-in profiles are written as data, in
-[`chalk/autograder/profiles.toml`](https://github.com/fabiommendes/chalk/blob/main/chalk/autograder/profiles.toml).
+[`packages/chalk-grader/chalk_grader/profiles.toml`](https://github.com/fabiommendes/chalk/blob/main/packages/chalk-grader/chalk_grader/profiles.toml).
 A `[profiles.<name>]` table in `chalk.toml` adds a profile with the same
 keys, for any test runner that writes a JUnit report. Questions select it
 with `profile: <name>`.

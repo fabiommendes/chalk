@@ -4,16 +4,14 @@ process: the audit hook of runners/pytest_guard.py and the notes for the
 teacher.
 """
 
-import io
 from fractions import Fraction
 from pathlib import Path
 
-from chalk.autograder.suspicious import scan
-from chalk.core import disqualification as dq
-from chalk.core import models
-from chalk.core.grades import load_grades_from_path, save_grades_to_path
-from tests.test_autograder_pytest import cache, make_grader, project, solution, template
-from tests.test_autograder_sandbox import needs_bwrap
+from test_pytest_profile import cache, make_grader, project, solution, template
+from test_sandbox import needs_bwrap
+
+from chalk_grader import disqualification as dq
+from chalk_grader.suspicious import scan
 
 __all__ = ["cache", "solution", "template"]
 
@@ -141,32 +139,3 @@ class TestScan:
         assert scan(root, template=template, patterns={}, skip=["tests"]) == [
             "starter.py:1: refers to JUnit reports"
         ]
-
-
-def test_notes_round_trip_in_the_grades_file(tmp_path: Path) -> None:
-    grades = {
-        "s1": models.SubmissionGrade(
-            id="s1",
-            responses={
-                "q1": models.ResponseGrade(score=Fraction(1), notes="calc.py:3: uses atexit"),
-                "q2": models.ResponseGrade(score=Fraction(1, 2), feedback="almost"),
-            },
-        ),
-        "s2": models.SubmissionGrade(id="s2", responses={"q1": models.ResponseGrade(score=0)}),
-    }
-    out = io.StringIO()
-    save_grades_to_path(grades, out, ["q1", "q2"])
-    lines = out.getvalue().splitlines()
-    assert lines[0] == "id,field,q1,q2"
-    assert lines[1:4] == [
-        "s1,score,1.00,0.50",
-        ",feedback,,almost",
-        ",notes,calc.py:3: uses atexit,",
-    ]
-
-    path = tmp_path / "grades.csv"
-    path.write_text(out.getvalue())
-    quiz = type("Quiz", (), {"id": "p1"})()
-    loaded = load_grades_from_path(path, quiz)
-    assert loaded._grades["s1"].responses["q1"].notes == "calc.py:3: uses atexit"
-    assert loaded._grades["s1"].responses["q2"].notes is None

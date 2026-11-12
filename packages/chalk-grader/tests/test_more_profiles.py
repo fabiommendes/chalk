@@ -6,16 +6,16 @@ import json
 import shutil
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from test_sandbox import needs_bwrap
 
-from chalk.autograder.profile_grader import ProfileGrader, resolve_profile
-from chalk.autograder.profiles import PrepareError, read_stdio_report
-from chalk.autograder.runners.stdio import compare
-from chalk.core import disqualification as dq
-from chalk.core import models
-from tests.test_autograder_sandbox import needs_bwrap
+from chalk_grader import disqualification as dq
+from chalk_grader import models
+from chalk_grader.profile_grader import ProfileGrader, resolve_profile
+from chalk_grader.profiles import PrepareError, read_stdio_report
+from chalk_grader.runners.stdio import compare
+from chalk_grader.task import Task
 
 SANDBOXES = ["none", pytest.param("bwrap", marks=needs_bwrap)]
 
@@ -31,15 +31,10 @@ def make_tree(root: Path, files: dict[str, str]) -> Path:
 def grader(
     profile: str, template: Path, solution: Path | None, cache: Path | None = None, **conf
 ) -> ProfileGrader:
-    question = SimpleNamespace(
-        id="q1",
-        quiz=SimpleNamespace(id="p1"),
-        root=template.parent,
-        get_template_path=lambda: template,
-    )
+    task = Task("q1", "p1", root=template.parent, template=template)
     return ProfileGrader(
         script=None,
-        question=question,  # type: ignore[arg-type]
+        task=task,
         conf=models.Autograder(profile=profile, timeout=120, **conf),
         name=profile,
         profile=resolve_profile(profile),

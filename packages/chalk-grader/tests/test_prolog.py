@@ -14,10 +14,10 @@ from fractions import Fraction
 from pathlib import Path
 
 import pytest
+from test_more_profiles import grader, make_tree
+from test_sandbox import needs_bwrap
 
-from chalk.core import disqualification as dq
-from tests.test_autograder_more_profiles import grader, make_tree
-from tests.test_autograder_sandbox import needs_bwrap
+from chalk_grader import disqualification as dq
 
 needs_swipl = pytest.mark.skipif(not shutil.which("swipl"), reason="swipl is needed")
 SANDBOXES = ["none", pytest.param("bwrap", marks=needs_bwrap)]

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, TypeIs, overload
 
 from rich.console import RenderableType
 from rich.text import Text
+
+from chalk_grader.disqualification import BuildError, Disqualified, Error, InvalidInput, Timeout
 
 from ..util.parsing import Parsed
 from ..util.sequence import unique
@@ -27,66 +28,8 @@ __all__ = [
 ]
 
 
-def Timeout() -> Disqualification:
-    """
-    Indicates that a response was disqualified due to a timeout during grading.
-    """
-    return Simple.TIMEOUT
-
-
-def InvalidInput() -> Disqualification:
-    """
-    Indicates that a response was disqualified due to invalid syntax or format.
-    """
-    return Simple.INVALID_INPUT
-
-
-def Error() -> Disqualification:
-    """
-    Indicates that a response was disqualified due to an internal error during grading.
-    """
-    return Simple.ERROR
-
-
-def BuildError() -> Disqualification:
-    """
-    Indicates that the response does not compile, so its tests could not run.
-    """
-    return Simple.BUILD_ERROR
-
-
-class Simple(Enum):
-    """
-    An enumeration of reasons why a response might be disqualified.
-    """
-
-    TIMEOUT = "The response took too long to execute."
-    INVALID_INPUT = "The response contains text with an invalid syntax."
-    ERROR = "Internal error during grading."
-    BUILD_ERROR = "The response does not compile."
-
-    def message(self) -> str:
-        return self.value
-
-    def render(self) -> str:
-        return self.name.lower().replace("_", "-")
-
-    def __str__(self) -> str:
-        return self.render()
-
-    def __lt__(self, other: Disqualification) -> Disqualification:
-        if not isinstance(other, Disqualification):
-            return NotImplemented
-        return merge(self, other)
-
-    def __repr__(self) -> str:
-        return f"{self.name.lower().title()}()"
-
-    def __bool__(self) -> Literal[False]:
-        return False
-
-    def __rich__(self) -> RenderableType:
-        return Text(self.render(), style="red")
+Simple = Disqualified
+"""The simple reasons, shared with chalk_grader."""
 
 
 @dataclass(frozen=True)

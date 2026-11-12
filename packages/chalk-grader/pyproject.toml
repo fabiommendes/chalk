@@ -1,0 +1,22 @@
+[project]
+name = "chalk-grader"
+version = "0.1.0"
+description = "Grade code answers in a sandbox with data profiles (pytest, cargo, elm-test, plunit...)."
+readme = "README.md"
+authors = [
+    { name = "Fábio Macêdo Mendes", email = "fabiomacedomendes@gmail.com" },
+]
+requires-python = ">=3.13"
+dependencies = [
+    "gitignore-lib>=0.1.1",
+    "pydantic>=2.13.4",
+    "rich>=15.0.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "chalk_grader"
+module-root = "."

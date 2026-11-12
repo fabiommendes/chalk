@@ -23,7 +23,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pydantic
@@ -31,8 +30,10 @@ import yaml
 from rich import get_console
 from rich.text import Text
 
-from .autograder.profile_grader import ProfileGrader, resolve_profile
-from .autograder.profiles import PrepareError
+from chalk_grader.profile_grader import ProfileGrader, resolve_profile
+from chalk_grader.profiles import PrepareError
+from chalk_grader.task import Task
+
 from .codehood_api import ApiError, CodehoodClient
 from .core import disqualification as dq
 from .core import models
@@ -244,17 +245,17 @@ def make_grader(found: FoundGrader, course: CourseConfig) -> ProfileGrader:
     """
     folder = found.folder
     template = folder / (found.conf.template or Path("template"))
-    question = SimpleNamespace(
-        id=found.slug,
-        quiz=SimpleNamespace(id="codehood"),
+    task = Task(
+        question_id=found.slug,
+        assignment_id="codehood",
         root=folder,
-        get_template_path=lambda: template if template.is_dir() else None,
+        template=template if template.is_dir() else None,
     )
     assert found.conf.profile is not None
     profile = resolve_profile(found.conf.profile, _user_profiles(course.root))
     return ProfileGrader(
         script=None,
-        question=question,  # type: ignore[arg-type]
+        task=task,
         conf=found.conf,
         name=found.conf.profile,
         profile=profile,

@@ -192,9 +192,9 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
     def get_grader(self) -> Grader[Any] | None:
         script = self.get_autograde_script()
         if script is not None:
-            from ..autograder.script_grader import ScriptGrader
+            from chalk_grader.script_grader import ScriptGrader
 
-            return ScriptGrader(script=script, question=self, conf=self.get_autograder())
+            return ScriptGrader(script=script, task=self.get_task(), conf=self.get_autograder())
 
         def grader(id: StudentId, answer: Any, /, **kwargs: Any) -> Graded | None:
             return self.grade_answer(answer)

@@ -41,9 +41,11 @@ class Repo(BaseQuestion[models.Repo, RepoAnswer]):
             if script is None:
                 return None
 
-            from ..autograder.script_grader import ScriptGrader
+            from chalk_grader.script_grader import ScriptGrader
 
-            raw_grader = ScriptGrader(script=script, question=self, conf=self.get_autograder())
+            raw_grader = ScriptGrader(
+                script=script, task=self.get_task(), conf=self.get_autograder()
+            )
 
         def repo_grader(
             id: StudentId,

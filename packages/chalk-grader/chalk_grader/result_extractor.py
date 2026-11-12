@@ -9,14 +9,15 @@ from fractions import Fraction
 from functools import lru_cache
 from logging import getLogger
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ..core import disqualification as dq
-from ..core import score
-from ..core.grader import Graded
-from ..protocols import JSON
+from . import disqualification as dq
+from . import score
+from .graded import Graded
 
 log = getLogger("chalk.autograder")
+
+type JSON = dict[str, Any] | list[Any] | str | int | float | bool | None
 
 if TYPE_CHECKING:
     Number = float

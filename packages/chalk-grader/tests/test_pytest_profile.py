@@ -3,18 +3,15 @@ import subprocess
 import textwrap
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-import typer
+from test_sandbox import needs_bwrap
 
-from chalk.autograder.profile_grader import ProfileGrader, resolve_profile
-from chalk.autograder.profiles import PrepareError, install_trusted_files, score_report
-from chalk.cli.autograde_cmd import check_autograder
-from chalk.core import disqualification as dq
-from chalk.core import models
-from chalk.core.grader import Graded
-from tests.test_autograder_sandbox import needs_bwrap
+from chalk_grader import disqualification as dq
+from chalk_grader import models
+from chalk_grader.profile_grader import ProfileGrader, resolve_profile
+from chalk_grader.profiles import PrepareError, install_trusted_files, score_report
+from chalk_grader.task import Task
 
 TESTS = """
 from calc import add, sub
@@ -144,16 +141,11 @@ def cache(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def make_grader(template: Path, cache: Path, solution: Path | None, **conf) -> ProfileGrader:
-    question = SimpleNamespace(
-        id="q1",
-        quiz=SimpleNamespace(id="p1"),
-        root=template.parent,
-        get_template_path=lambda: template,
-    )
+    task = Task("q1", "p1", root=template.parent, template=template)
     conf = {"profile": "python-pytest", "timeout": 60, **conf}
     return ProfileGrader(
         script=None,
-        question=question,  # type: ignore[arg-type]
+        task=task,
         conf=models.Autograder(**conf),
         name="python-pytest",
         profile=resolve_profile("python-pytest"),
@@ -295,23 +287,3 @@ def test_copy_of_solution_is_not_changed(template, cache, solution) -> None:
     before = shutil.copytree(solution, solution.parent / "before")
     make_grader(template, cache, solution, sandbox="none")("s1", solution)
     assert sorted(p.name for p in solution.iterdir()) == sorted(p.name for p in before.iterdir())
-
-
-class TestCheck:
-    def question(self, graded, reference="solution"):
-        return SimpleNamespace(
-            get_grader=lambda: lambda id, answer, **kw: graded,
-            get_reference_answer=lambda: reference,
-        )
-
-    def test_full_score_passes(self) -> None:
-        check_autograder(self.question(Graded(Fraction(1))), timeout=None, keep_files=False)  # type: ignore[arg-type]
-
-    @pytest.mark.parametrize("score", [Fraction(3, 4), dq.Error()])
-    def test_partial_score_fails(self, score) -> None:
-        with pytest.raises(typer.Exit):
-            check_autograder(self.question(Graded(score)), timeout=None, keep_files=False)  # type: ignore[arg-type]
-
-    def test_needs_reference(self) -> None:
-        with pytest.raises(typer.BadParameter):
-            check_autograder(self.question(Graded(1), None), timeout=None, keep_files=False)  # type: ignore[arg-type]

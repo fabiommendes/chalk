@@ -16,15 +16,14 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
-from chalk.core import disqualification as dq
-
-from ..core import Disqualification, QuestionId, QuizId, StudentId, models
-from ..core.answer import AnyAnswer, serialize_any_answer
-from ..core.grader import Graded
-from ..core.score import Score
+from . import disqualification as dq
+from . import models
+from .disqualification import Disqualified
+from .graded import Graded
 from .repo import Repo
 from .result_extractor import extract_result_from_file
 from .sandbox import bwrap_command
+from .score import Score
 
 __all__ = [
     "ChalkEnv",
@@ -58,7 +57,7 @@ ANSI_REGEX = re.compile(r"(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
 class Result:
     return_code: int
     #: None when the answer goes to manual grading.
-    score: Score | Disqualification | None
+    score: Score | Disqualified | None
     feedback: str | None = None
     stdout: str | None = None
     #: Notes for the teacher, never shown to the student.
@@ -340,11 +339,12 @@ class ChalkEnv:
     variables.
     """
 
-    answer: AnyAnswer
+    #: The answer as text; for a directory, its path.
+    answer: str
     answer_path: str
-    question_id: QuestionId
-    quiz_id: QuizId
-    student_id: StudentId
+    question_id: str
+    assignment_id: str
+    student_id: str
     pass_env: tuple[str, ...] = ()
 
     def to_env_dict(self, path: Path, result: Path) -> dict[str, str]:
@@ -361,10 +361,10 @@ class ChalkEnv:
             "CHALK_ROOT": str(path),
             "CHALK_RESULT": str(result),
             "CHALK_ANSWER": self.answer_path,
-            "CHALK_ANSWER_CONTENT": serialize_any_answer(self.answer),
+            "CHALK_ANSWER_CONTENT": self.answer,
             "CHALK_STUDENT": self.student_id,
             "CHALK_QUESTION": self.question_id,
-            "CHALK_ASSIGNMENT": self.quiz_id,
+            "CHALK_ASSIGNMENT": self.assignment_id,
         }
 
         for var in (*PASS_ENV, *self.pass_env):

@@ -12,15 +12,15 @@ import tempfile
 import time
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from test_sandbox import needs_bwrap
 
-from chalk.autograder.profile_grader import ProfileGrader, resolve_profile
-from chalk.autograder.profiles import PrepareError, score_report
-from chalk.autograder.services import RUNNERS
-from chalk.core import models
-from tests.test_autograder_sandbox import needs_bwrap
+from chalk_grader import models
+from chalk_grader.profile_grader import ProfileGrader, resolve_profile
+from chalk_grader.profiles import PrepareError, score_report
+from chalk_grader.services import RUNNERS
+from chalk_grader.task import Task
 
 SERVER = """\
 import json, os, signal, sys
@@ -108,16 +108,11 @@ def make_grader(tmp_path: Path, profiles=PROFILES, **conf) -> ProfileGrader:
     (template / "service").mkdir()
     (template / "tests" / "run.py").write_text(RUNNER)
     (template / "service" / "server.py").write_text(SERVER)
-    question = SimpleNamespace(
-        id="q1",
-        quiz=SimpleNamespace(id="p1"),
-        root=template.parent,
-        get_template_path=lambda: template,
-    )
+    task = Task("q1", "p1", root=template.parent, template=template)
     conf.setdefault("sandbox", "bwrap")
     return ProfileGrader(
         script=None,
-        question=question,  # type: ignore[arg-type]
+        task=task,
         conf=models.Autograder(profile="client", timeout=30, **conf),
         name="client",
         profile=resolve_profile("client", profiles),

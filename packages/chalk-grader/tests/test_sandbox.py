@@ -1,13 +1,13 @@
 import time
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from chalk.autograder.sandbox import BwrapUnavailable, bwrap_command, check_bwrap
-from chalk.autograder.script_grader import ScriptGrader
-from chalk.core import disqualification as dq
-from chalk.core import models
+from chalk_grader import disqualification as dq
+from chalk_grader import models
+from chalk_grader.sandbox import BwrapUnavailable, bwrap_command, check_bwrap
+from chalk_grader.script_grader import ScriptGrader
+from chalk_grader.task import Task
 
 
 def bwrap_works() -> bool:
@@ -32,10 +32,8 @@ def run(tmp_path: Path, body: str, **conf):
     script = tmp_path / "grade.sh"
     script.write_text("#!/bin/sh\n" + body)
     script.chmod(0o755)
-    question = SimpleNamespace(
-        id="q1", quiz=SimpleNamespace(id="p1"), root=tmp_path, get_template_path=lambda: None
-    )
-    grader = ScriptGrader(script, question, models.Autograder(**conf))  # type: ignore[arg-type]
+    task = Task("q1", "p1", root=tmp_path, template=None)
+    grader = ScriptGrader(script, task, models.Autograder(**conf))
     return grader("s1", "answer")
 
 
@@ -48,7 +46,7 @@ def report(body: str) -> str:
 
 class TestCommand:
     def test_hides_home_and_tmp(self, monkeypatch) -> None:
-        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
         args = bwrap_command("true", workdir=Path("/tmp/w"), env={"PATH": ""})
         tmpfs = {args[i + 1] for i, a in enumerate(args) if a == "--tmpfs"}
         assert {"/home", "/tmp", "/run"} <= tmpfs
@@ -56,14 +54,14 @@ class TestCommand:
         assert "--share-net" not in args
 
     def test_hides_home_outside_hidden_dirs(self, monkeypatch, tmp_path) -> None:
-        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
-        monkeypatch.setattr("chalk.autograder.sandbox.HIDDEN", ())
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.HIDDEN", ())
         args = bwrap_command("true", workdir=Path("/w"), env={"HOME": str(tmp_path)})
         assert args[args.index(str(tmp_path)) - 1] == "--tmpfs"
 
     def test_reexposes_path_inside_home(self, monkeypatch, tmp_path) -> None:
-        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
-        monkeypatch.setattr("chalk.autograder.sandbox.HIDDEN", (str(tmp_path),))
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.HIDDEN", (str(tmp_path),))
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         args = bwrap_command("true", workdir=tmp_path / "w", env={"PATH": str(bin_dir)})
@@ -71,8 +69,8 @@ class TestCommand:
         assert args[i - 1] == "--ro-bind"
 
     def test_recreates_symlink_inside_home(self, monkeypatch, tmp_path) -> None:
-        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
-        monkeypatch.setattr("chalk.autograder.sandbox.HIDDEN", (str(tmp_path),))
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.HIDDEN", (str(tmp_path),))
         (tmp_path / "python-3.13.5").mkdir()
         (tmp_path / "python-3.13").symlink_to("python-3.13.5")
         args = bwrap_command(
@@ -83,7 +81,7 @@ class TestCommand:
         assert args[args.index(str(tmp_path / "python-3.13.5")) - 1] == "--ro-bind"
 
     def test_overlays_come_after_workdir(self, monkeypatch) -> None:
-        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
         args = bwrap_command(
             "true", workdir=Path("/w"), overlays=[(Path("/t/tests"), Path("/w/tests"))], env={}
         )
@@ -91,7 +89,7 @@ class TestCommand:
         assert args[args.index("/w/tests") - 2] == "--ro-bind"
 
     def test_network(self, monkeypatch) -> None:
-        monkeypatch.setattr("chalk.autograder.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
         args = bwrap_command("true", workdir=Path("/tmp/w"), network=True, env={})
         assert "--share-net" in args
 

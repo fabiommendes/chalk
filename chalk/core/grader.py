@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import reduce
-from typing import Any, Literal, NamedTuple, Protocol, TypedDict, Unpack, cast
+from typing import Any, Literal, Protocol, TypedDict, Unpack, cast
 
 import opt
-from rich.columns import Columns
-from rich.console import RenderableType
-from rich.text import Text
 
-from . import adjustment, score
-from .adjustment import Adjustment
+from chalk_grader.graded import DEFAULT_TIMEOUT, Graded
+
+from . import score
 from .disqualification import Disqualification
 from .models import StudentId
-from .score import Score, is_score, rich_render_percent
+from .score import Score, is_score
 
 __all__ = [
     # Basic types
@@ -28,72 +25,6 @@ __all__ = [
     "Fixed",
     "Compose",
 ]
-
-DEFAULT_TIMEOUT = 30.0
-try:
-    DEFAULT_TIMEOUT = float(os.environ.get("CHALK_AUTOGRADE_TIMEOUT", "30"))
-except ValueError:
-    pass
-
-
-class Graded(NamedTuple):
-    score: Score | Disqualification
-    feedback: str | None = None
-    adjustments: list[Adjustment] | None = None
-    #: Notes for the teacher, such as signs of tampering. Never shown to
-    #: the student.
-    notes: str | None = None
-
-    def adjusted_score(self) -> Score | Disqualification:
-        """
-        Return the score after applying all adjustments.
-        """
-        if not self.adjustments or isinstance(self.score, Disqualification):
-            return self.score
-
-        return cast(Score, adjustment.apply_chain(self.score, self.adjustments))
-
-    @classmethod
-    def null_score(
-        cls,
-        *,
-        feedback: str | None = None,
-        adjustments: list[Adjustment] | None = None,
-    ) -> Graded:
-        """
-        Zero grade, with some optional feedback.
-        """
-        return cls(score=score.MIN_SCORE, feedback=feedback, adjustments=adjustments)
-
-    @classmethod
-    def max_score(
-        cls,
-        *,
-        feedback: str | None = None,
-        adjustments: list[Adjustment] | None = None,
-    ) -> Graded:
-        """
-        Return a new Graded object with the score capped at max_score.
-        """
-        return Graded(score=score.MAX_SCORE, feedback=feedback, adjustments=adjustments)
-
-    def __rich__(self) -> RenderableType:
-        parts = []
-        if isinstance(self.score, Disqualification):
-            base = self.score.__rich__()
-            parts.append(base)
-        else:
-            base = rich_render_percent(self.score)
-            parts.append(base)
-            if self.adjustments:
-                adj_score = cast(Score, self.adjusted_score())
-                parts.append(Text(" ➔ ", style="dim"))
-                parts.append(rich_render_percent(adj_score))
-
-        if self.feedback:
-            parts.append(Text(f"({self.feedback})", style="dim"))
-
-        return Columns(parts) if len(parts) > 1 else parts[0]
 
 
 class GraderKwargs(TypedDict, total=False):
@@ -171,7 +102,7 @@ class Compose[T](Grader[T]):
         **kwargs: Unpack[GraderKwargs],
     ) -> Graded | None:
         outcomes = [*opt.filter(grader(id, answer, **kwargs) for grader in self.graders)]
-        scores = [cast(Score, x.adjusted_score()) for x in outcomes if is_score(x.score)]
+        scores = [cast(Score, x.score) for x in outcomes if is_score(x.score)]
         disqualifications = [(i, x.score) for i, x in enumerate(outcomes) if not is_score(x.score)]
 
         if disqualifications:

@@ -28,7 +28,7 @@ from collections.abc import Callable, Iterable, Mapping
 from logging import getLogger
 from pathlib import Path
 
-from ..core import models
+from . import models
 from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
 from .sandbox import bwrap_command

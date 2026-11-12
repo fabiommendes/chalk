@@ -6,12 +6,13 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
-from ..core import Question, StudentId, models
-from ..core import disqualification as dq
-from ..core.grader import DEFAULT_TIMEOUT, Graded, Grader
+from . import disqualification as dq
+from . import models
+from .graded import DEFAULT_TIMEOUT, Graded
 from .repo import Repo
 from .sandbox import check_bwrap
 from .script_runner import ChalkEnv, Result, Sandbox, ScriptRunner
+from .task import Task
 
 NOT_GIVEN: Any = object()
 
@@ -19,7 +20,7 @@ log = getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class ScriptGrader(Grader[str | Path]):
+class ScriptGrader:
     """
     Grades an answer with the autograder script of the question.
 
@@ -28,12 +29,12 @@ class ScriptGrader(Grader[str | Path]):
     """
 
     script: Path | None
-    question: Question
+    task: Task
     conf: models.Autograder
 
     def __call__(
         self,
-        id: StudentId,
+        id: str,
         answer: str | Path,
         /,
         *,
@@ -72,8 +73,8 @@ class ScriptGrader(Grader[str | Path]):
                 env=ChalkEnv(
                     answer=data,
                     answer_path=str(self._answer_path()),
-                    question_id=self.question.id,
-                    quiz_id=self.question.quiz.id,
+                    question_id=self.task.question_id,
+                    assignment_id=self.task.assignment_id,
                     student_id=id,
                     pass_env=tuple(self.conf.pass_env),
                 ),
@@ -119,7 +120,7 @@ class ScriptGrader(Grader[str | Path]):
 
     @contextmanager
     def student_repository(
-        self, student_id: StudentId, answer: str | Path | None, /, clear: bool = True
+        self, student_id: str, answer: str | Path | None, /, clear: bool = True
     ) -> Any:
         """
         Context manager that creates a isolated student repository within the
@@ -133,7 +134,7 @@ class ScriptGrader(Grader[str | Path]):
         repo = Repo(Path(tmp_dir.name))
 
         try:
-            template = self.question.get_template_path()
+            template = self.task.template
             student_repo = answer if isinstance(answer, Path) and answer.is_dir() else None
 
             answer_content = None
@@ -182,7 +183,7 @@ class ScriptGrader(Grader[str | Path]):
         if kind != "bwrap":
             raise NotImplementedError(f"sandbox {kind!r} is not implemented yet")
         check_bwrap()
-        root = getattr(self.question, "root", None) or Path()
+        root = self.task.root
         mounts = tuple(root / p.expanduser() for p in self.conf.mounts)
         return Sandbox(network=self.conf.network == "host", readable=mounts)
 
@@ -191,8 +192,8 @@ class ScriptGrader(Grader[str | Path]):
         Generate a chalk.info file for the student repository.
         """
         info = {
-            "question_id": self.question.id,
-            "quiz_id": self.question.quiz.id,
+            "question_id": self.task.question_id,
+            "quiz_id": self.task.assignment_id,
             "answer_path": self._answer_path(),
             **kwargs,
         }

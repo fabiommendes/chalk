@@ -1,14 +1,14 @@
 import os
 import time
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from chalk.autograder.repo import Repo
-from chalk.autograder.script_grader import ScriptGrader
-from chalk.autograder.script_runner import ChalkEnv, ScriptRunner
-from chalk.core import models
+from chalk_grader import models
+from chalk_grader.repo import Repo
+from chalk_grader.script_grader import ScriptGrader
+from chalk_grader.script_runner import ChalkEnv, ScriptRunner
+from chalk_grader.task import Task
 
 
 def run_script(tmp_path: Path, body: str, *, timeout: float = 5, **env_kwargs):
@@ -21,7 +21,7 @@ def run_script(tmp_path: Path, body: str, *, timeout: float = 5, **env_kwargs):
         answer="x",
         answer_path="answer.txt",
         question_id="q1",
-        quiz_id="p1",
+        assignment_id="p1",
         student_id="s1",
         **env_kwargs,
     )
@@ -88,12 +88,8 @@ class TestTemplate:
         test_file = template / "tests" / "test_x.py"
         test_file.write_text("original")
 
-        question = SimpleNamespace(
-            id="q1",
-            quiz=SimpleNamespace(id="p1"),
-            get_template_path=lambda: template,
-        )
-        grader = ScriptGrader(tmp_path / "grade.sh", question, models.Autograder())  # type: ignore[arg-type]
+        task = Task("q1", "p1", root=Path(), template=template)
+        grader = ScriptGrader(tmp_path / "grade.sh", task, models.Autograder())
         with grader.student_repository("s1", "answer") as repo:
             (repo.root / "tests" / "test_x.py").write_text("hacked")
 

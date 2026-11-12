@@ -78,9 +78,9 @@ class Textual(BaseQuestion[models.Textual, TextualAnswer]):
         if script is None:
             return None
 
-        from ..autograder.script_grader import ScriptGrader
+        from chalk_grader.script_grader import ScriptGrader
 
-        return ScriptGrader(script=script, question=self, conf=self.get_autograder())
+        return ScriptGrader(script=script, task=self.get_task(), conf=self.get_autograder())
 
     def validate_answer(self, data: Any) -> TextualAnswer:
         answer = validate_type(data, str)

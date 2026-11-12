@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "chalk-grader",
     "errorz>=0.2.1",
     "frozendict>=2.4.7",
     "gitignore-lib>=0.1.1",
@@ -51,9 +52,9 @@ dev = [
 [tool.taskipy.tasks]
 docs = { cmd = "uv run mkdocs build", help = "Build HTML documentation" }
 docs-serve = { cmd = "uv run mkdocs serve", help = "Serve HTML documentation with live reload" }
-test = "pytest tests"
+test = "pytest tests packages/chalk-grader/tests"
 lint = "ruff check ."
-check = { cmd = "ruff check . && pytest -q tests && mkdocs build --strict -q", help = "Lint, tests and docs: run before every commit" }
+check = { cmd = "ruff check . && pytest -q tests packages/chalk-grader/tests && mkdocs build --strict -q", help = "Lint, tests and docs: run before every commit" }
 build = "uv build"
 cli-docs = { cmd = "typer chalk.cli utils docs --name chalk --title \"Command reference\" --output docs/user-manual/cli.md", help = "Regenerate docs/user-manual/cli.md from the CLI" }
 
@@ -63,6 +64,7 @@ module-root = "."
 
 [tool.ruff]
 line-length = 100
+src = [".", "packages/chalk-grader"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -82,5 +84,9 @@ ignore = [
     "E501", # long lines are left to the formatter
 ]
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
 [tool.uv.sources]
+chalk-grader = { workspace = true }
 mdq = { path = "../../codehood/mdq/mdq-py", editable = true }

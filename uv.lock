@@ -13,6 +13,12 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "chalk",
+    "chalk-grader",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -107,6 +113,7 @@ name = "chalk"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "chalk-grader" },
     { name = "errorz" },
     { name = "frozendict" },
     { name = "gitignore-lib" },
@@ -139,6 +146,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "chalk-grader", editable = "packages/chalk-grader" },
     { name = "errorz", specifier = ">=0.2.1" },
     { name = "frozendict", specifier = ">=2.4.7" },
     { name = "gitignore-lib", specifier = ">=0.1.1" },
@@ -167,6 +175,23 @@ dev = [
     { name = "taskipy", specifier = ">=1.14.1" },
     { name = "types-pygments", specifier = ">=2.20.0.20260518" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20261030" },
+]
+
+[[package]]
+name = "chalk-grader"
+version = "0.1.0"
+source = { editable = "packages/chalk-grader" }
+dependencies = [
+    { name = "gitignore-lib" },
+    { name = "pydantic" },
+    { name = "rich" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gitignore-lib", specifier = ">=0.1.1" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "rich", specifier = ">=15.0.0" },
 ]
 
 [[package]]
@@ -557,6 +582,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'hypothesis'", specifier = ">=6.167.1" },
     { name = "linkify-it-py", specifier = ">=2.2.0" },
     { name = "markdown-it-py", specifier = ">=4.2.0" },
+    { name = "markdownify", marker = "extra == 'html'", specifier = ">=1.0" },
     { name = "optionz", specifier = ">=0.2.0" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pygments", specifier = ">=2.21.0" },
@@ -567,7 +593,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "unicodedata2", specifier = ">=17,<18" },
 ]
-provides-extras = ["test", "hypothesis"]
+provides-extras = ["test", "hypothesis", "html"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -576,6 +602,7 @@ dev = [
     { name = "jsonschema", specifier = ">=4.18" },
     { name = "lark-parser", specifier = ">=0.12.0" },
     { name = "lark-run", specifier = ">=0.1.1" },
+    { name = "markdownify", specifier = ">=1.0" },
     { name = "mypy", specifier = ">=2.3.1" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
