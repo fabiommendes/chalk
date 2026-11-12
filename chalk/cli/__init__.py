@@ -4,12 +4,10 @@ from . import (
     autograde_cmd,
     clear_app,
     codehood_app,
-    collect_cmd,
     contrib_app,
     grade_cmd,
     info_app,
     init_app,
-    question_app,
     quiz_app,
     response_cmds,
     roster_app,
@@ -43,16 +41,10 @@ app.add_typer(
     help="Manage quizzes.",
 )
 app.add_typer(
-    question_app.app,
-    name="question",
-    help="Manage questions for quizzes.",
-)
-app.add_typer(
     codehood_app.app,
     name="codehood",
     help="Exchange data with a codehood course in the same repository.",
 )
-collect_cmd.add_collect_command(app)
 grade_cmd.add_grade_cmd(app)
 autograde_cmd.add_autograde_command(app)
 info_app.add_info_command(app)

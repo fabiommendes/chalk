@@ -84,3 +84,15 @@ def yn_prompt(message: str, default: Literal["y", "n", "N"] = "y") -> bool | Non
             return None
         case _:
             raise RuntimeError("Invalid choice")
+
+
+def parse_sort(sort: str | None, /) -> tuple[str | None, bool]:
+    """
+    Split a `--sort` value into the column and the order: a `-` prefix sorts
+    in descending order, and `+` is accepted for symmetry.
+    """
+    if not sort:
+        return None, False
+    if sort.startswith("-"):
+        return sort[1:], True
+    return sort.removeprefix("+"), False

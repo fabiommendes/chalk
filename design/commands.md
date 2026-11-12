@@ -1,5 +1,8 @@
 # Chalk CLI Command Tree and Flags (v1)
 
+> **Descontinuado.** Substituído por `design/cli.md`. Esta árvore nunca foi
+> implementada. Fica aqui só como histórico.
+
 This document defines the final command tree and the flags for each node.
 
 ## Global flags

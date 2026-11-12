@@ -12,79 +12,12 @@ from rich.prompt import Prompt
 from chalk.core import Classroom
 
 from .. import env
-from .. import table as tb
 from ..core import Quiz, Student, StudentId
 from ..core.roster import ConflictMode, Roster, read_roster_like
 from ..util import clean_data
 from .util import safe
 
 app = typer.Typer(help="Manage the student roster.", no_args_is_help=True)
-
-
-# ==============================================================================
-# chalk roster show
-# ==============================================================================
-@app.command(name="show")
-@safe
-def show(
-    sort: Annotated[
-        str,
-        typer.Option(
-            ...,
-            "-s",
-            "--sort",
-            help="Sort by id, name, email, or github",
-            metavar="COLUMN",
-        ),
-    ] = "id",
-    format: Annotated[
-        str,
-        typer.Option(
-            ...,
-            "-f",
-            "--format",
-            help="Output format (table, csv, json, yaml)",
-            metavar="FORMAT",
-        ),
-    ] = "table",
-    output: Annotated[
-        Path | None,
-        typer.Option(
-            ...,
-            "-o",
-            "--output",
-            help="Write output to file",
-            metavar="FILE",
-        ),
-    ] = None,
-) -> None:
-    """
-    Show the current student roster.
-    """
-
-    cls = Classroom.load()
-    roster = cls.get_roster()
-    table = roster.table()
-
-    reverse = False
-    if isinstance(sort, str):
-        if sort.startswith("-"):
-            sort = sort[1:]
-            reverse = True
-        if sort.startswith("+"):
-            sort = sort[1:]
-
-    if sort and sort != "id" and sort not in table.columns:
-        rich.print(f"[b red]Invalid sort column: {sort}[/]", file=sys.stderr)
-        raise SystemExit(1)
-
-    table.dump(
-        output,
-        format=tb.validate_table_format(format),
-        styles={"email": "dim white", "id": "bold yellow"},
-        sort=sort or "id",
-        reverse=reverse,
-    )
 
 
 # ==============================================================================

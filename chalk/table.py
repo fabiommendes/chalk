@@ -1,6 +1,7 @@
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import redirect_stdout
 from decimal import Decimal
+from numbers import Number
 from pathlib import Path
 from typing import (
     IO,
@@ -171,14 +172,15 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         Dump the table to a file or the console in the specified format.
         """
         if format is None and isinstance(file, Path):
-            format = file.suffix[1:].lower()  # type: ignore
-            if format not in {"csv", "json", "yaml", "yml"}:
-                format = "table"
-            else:
-                msg = f"Could not infer format from file extension: {file.suffix}"
-                raise ValueError(msg)
+            suffix = file.suffix[1:].lower()
+            format = suffix if suffix in {"csv", "json", "yaml", "yml"} else "table"  # type: ignore
         elif format is None:
             format = "table"
+
+        if format != "table" and sort is not None:
+            return self.sorted(sort, reverse=reverse, render=render).dump(
+                file, format=format, extra_rows=extra_rows
+            )
 
         if extra_rows and not format == "table":
             out = self
@@ -278,22 +280,7 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
         if not bool(self):
             return empty
 
-        data = self
-
-        if sort in ("id", None):
-            df = data._df
-            sort_key = df.index.map(lambda id: str(id).casefold())
-            indexes = natsort.index_humansorted(sort_key, reverse=reverse)
-            data = data.from_dataframe(df.iloc[indexes])
-        elif sort is not None:
-
-            def sort_with(id: Id, row: Row[DT], /) -> Any:
-                value = row.get(sort)
-                cell = render_with(value, column=sort, render=render) or ""
-                return (value is not None, cell, cell.casefold())
-
-            key: RowKeyFn[Id, DT] = sort_with
-            data = data.order_by(key, reverse=reverse)
+        data = self.sorted(sort, reverse=reverse, render=render)
 
         table = RichTable(title=title)
 
@@ -417,6 +404,29 @@ class Table[DT, Id: str = str](Mapping[Id, Row[DT]]):
 
         columns = [k for k in self.columns if k in keep]
         return self.from_dataframe(self._df[columns])
+
+    def sorted(
+        self, sort: str | None, /, *, reverse: bool = False, render: RenderFn | None = None
+    ) -> Self:
+        """
+        Return a copy sorted by a column, or by id when sort is None or "id".
+        Numbers sort by value, other cells by their rendered text.
+        """
+        if sort in ("id", None):
+            sort_key = self._df.index.map(lambda id: str(id).casefold())
+            indexes = natsort.index_humansorted(sort_key, reverse=reverse)
+            return self.from_dataframe(self._df.iloc[indexes])
+
+        def sort_with(id: Id, row: Row[DT], /) -> Any:
+            value = row.get(sort)
+            if isinstance(value, Number) and not isinstance(value, bool):
+                if value != value:  # NaN is a missing value
+                    return (False, 1, 0, "")
+                return (True, 0, value, "")
+            cell = render_with(value, column=sort, render=render) or ""
+            return (value is not None, 1, 0, cell.casefold())
+
+        return self.order_by(sort_with, reverse=reverse)
 
     def order_by(self, key: RowKey[Id, DT], /, reverse: bool = False) -> Self:
         """

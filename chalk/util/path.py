@@ -30,8 +30,7 @@ def as_stream(file: StreamLike) -> Generator[IO[str]]:
         elif file is None:
             yield sys.stdout
         else:
-            stream = file
-            yield file
+            yield file  # the caller opened it, the caller closes it
     finally:
         if stream is not None:
             stream.close()

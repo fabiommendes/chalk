@@ -11,61 +11,9 @@ import typer
 from ..core import Classroom, Quiz, models
 from ..core.decimal import as_chalk_decimal, render_decimal
 from ..env import ask_optional_string
-from ..table import Table
 from .util import safe
 
-app = typer.Typer(help="Manage the student roster.", no_args_is_help=True)
-
-
-# ==============================================================================
-# chalk quiz list
-# ==============================================================================
-@app.command(name="list")
-@safe
-def list_quizzes(
-    sort: Annotated[
-        str,
-        typer.Option(
-            ...,
-            "-s",
-            "--sort",
-            help="Sort by id, name, start, or end",
-            metavar="COLUMN",
-        ),
-    ] = "id",
-) -> None:
-    """
-    Show the current list of quizzes.
-    """
-
-    if sort is not None and sort not in {"id", "name", "start", "end"}:
-        rich.print(f"[b red]Invalid sort column: {sort}[/]", file=sys.stderr)
-        raise typer.Exit(1)
-
-    cfg = Classroom.load()
-    rows = []
-    ids: list[str] = []
-
-    for quiz in cfg.iter_quizzes():
-        cells = {
-            "name": quiz.name,
-            "start": quiz.start,
-            "end": quiz.end,
-        }
-
-        ids.append(quiz.id)
-        rows.append(cells)
-
-    if not ids:
-        rich.print("No quiz found!")
-        return
-
-    table = Table(rows, index=ids)
-    table = table.select_columns(["name", "start", "end"])
-    table.print(
-        sort=sort,
-        styles={"id": "bold yellow"},
-    )
+app = typer.Typer(help="Manage quizzes.", no_args_is_help=True)
 
 
 # ==============================================================================

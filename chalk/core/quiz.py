@@ -358,6 +358,12 @@ class Quiz:
     # Display user info
     #
     def __rich__(self) -> RenderableType:
+        return self.render()
+
+    def render(self, *, sort: str | None = None, reverse: bool = False) -> RenderableType:
+        """
+        Render the table of questions, with a row of totals.
+        """
         totals = self.grades.get_dataframe(total="__total")["__total"].dropna().to_list()
         grades_cell = None
         max_grade = None
@@ -381,6 +387,8 @@ class Quiz:
                 }
             ],
             styles={"id": "bold yellow", "value": "bold blue"},
+            sort=sort,
+            reverse=reverse,
         )
 
     def info(self) -> dict[str, Any]:

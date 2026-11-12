@@ -5,28 +5,50 @@ Run `chalk COMMAND --help` for the options of each command.
 ```text
 chalk
 ├── init         create chalk.toml and roster.csv in the current directory
-├── info         show the classroom configuration
+├── show         show the classroom, a quiz, a question, the roster or answers
+├── grade        grade answers by hand
+├── autograde    grade a question with its answer key or autograder script
+├── extract      move answers between submissions.csv and one file per student
+├── clear        remove temporary files
+├── info         show the versions of chalk and its dependencies
 ├── roster
-│   ├── show     show the roster
 │   ├── add      add one student
 │   ├── import   merge students from another spreadsheet
 │   └── validate check ids, required fields and submissions
 ├── quiz
-│   ├── list     list quizzes
 │   └── create   create a quiz
-├── question
-│   ├── list     list the questions of a quiz
-│   └── show     show one question
-├── show         show a quiz, a question, answers or grades
-├── collect      gather the answers to a question in one file
-├── extract      move answers between submissions.csv and one file per student
-├── autograde    grade a question with its answer key or autograder script
-├── grade        grade answers by hand
-├── clear        remove temporary files
 ├── codehood
 │   ├── grades   write quiz grades to codehood's grades.csv
 │   └── autograde grade the code answers of a codehood exam
 └── contrib      run a contrib module (GitHub Classroom, converters...)
+```
+
+Every reading goes through `chalk show`; the other commands change files.
+
+## Showing things
+
+`chalk show [LOC]` takes a quiz (`p1`) or a question (`p1/q1`). Without
+`LOC` it shows the classroom.
+
+| `LOC`   | Without options                      | `-g`                     | Other options                                       |
+|---------|--------------------------------------|--------------------------|-----------------------------------------------------|
+| empty   | classroom summary and its quizzes    | grades of every quiz     | `--roster`: the roster                              |
+| `p1`    | questions of the quiz with statistics | grades of the quiz      |                                                     |
+| `p1/q1` | the question and its metadata        | grades of the question   | `--answers`: every answer; `--student ID`: one      |
+
+- `-f FORMAT` and `-o FILE` export any table as `table`, `csv`, `json` or
+  `yaml`. Without `-f`, the extension of `-o` decides. `--answers` also takes
+  `md`, its default.
+- `-s COLUMN` sorts tables; `-s -COLUMN` sorts in descending order.
+- `--student ID` with `-g` keeps only the row of that student. The id may be
+  approximate (name, username).
+- `chalk show -f json` writes the classroom and its quizzes as data.
+
+```sh
+chalk show p1 -g -o p1.csv          # grades of p1 as CSV
+chalk show -g --final -f json       # final_grade() of conf.py per student
+chalk show --roster -s -name        # roster in reverse name order
+chalk show p1/q3 --answers -o q3.md # every answer to q3 in one file
 ```
 
 ## Grading codehood answers
