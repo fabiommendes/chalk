@@ -29,11 +29,11 @@ respostas que chegam durante a prova. O MVP é Elm (perfil `elm-test`).
 ## Decisões
 
 - Três projetos: o motor `chalk-grader` (`packages/chalk-grader/`, extraído
-  de `chalk/autograder/`), o chalk, e o `codehood-worker`, no repositório do
-  codehood, ao lado de `cli/`. O worker depende do `chalk-grader` e do
+  de `chalk/autograder/`), o chalk, e o `chalk-worker`, repositório próprio
+  incluído no codehood como subtree em `workers/chalk-worker/`. O worker depende do `chalk-grader` e do
   `codehood-cli` (cliente gerado do OpenAPI), não do chalk.
 - `chalk.codehood_autograde` (graders, `verify_reference`, `grade_answer`,
-  `to_feedback`) e `chalk.codehood_api` vão para o `codehood-worker`; o
+  `to_feedback`) e `chalk.codehood_api` vão para o `chalk-worker`; o
   `chalk codehood autograde` vira o `--once` dele. O chalk fica só com
   `chalk codehood grades`.
 - A fila no servidor está no RFC `dev/rfc/fila-de-correcao-externa.md` do
@@ -90,7 +90,7 @@ REST nova:
 ## Worker (chalk)
 
 ```
-codehood-worker [--exam <slug> | --discipline <slug>] [--poll 10] [--batch 4]
+chalk-worker [--exam <slug> | --discipline <slug>] [--poll 10] [--batch 4]
                       [--server <url>] [--key-file <arquivo>] [--once]
 ```
 

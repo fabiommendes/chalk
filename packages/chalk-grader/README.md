@@ -1,6 +1,6 @@
 # chalk-grader
 
-The grading engine of chalk, shared with codehood-worker: profiles written as
+The grading engine of chalk, shared with chalk-worker: profiles written as
 data, the bwrap sandbox, the reference run that fixes the expected tests, the
 scoring and the checks for tampering. It knows nothing about quizzes, rosters
 or codehood.
@@ -24,4 +24,8 @@ grader = ProfileGrader(
 graded = grader("student-id", "module Main exposing (..)\n...")
 ```
 
-See `dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md` in the chalk repository for the security model.
+Linux only: student code runs under [bubblewrap](https://github.com/containers/bubblewrap)
+(`bwrap`). The security model is in
+[dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md](https://github.com/fabiommendes/chalk/blob/main/dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md)
+(in Portuguese), and the profiles are documented in
+[docs/user-manual/autograding-scripts.md](https://github.com/fabiommendes/chalk/blob/main/docs/user-manual/autograding-scripts.md).

@@ -33,7 +33,7 @@ Workspace uv com dois pacotes:
 - `chalk` (raiz): quizzes, roster, notas, CLI.
 - `chalk-grader` (`packages/chalk-grader/`, `import chalk_grader`): o motor de
   correção (perfis, sandbox, `ProfileGrader`, scoring, guard). Dependência
-  comum do chalk e do `codehood-worker`. Não importa nada do chalk; testes em
+  comum do chalk e do `chalk-worker`. Não importa nada do chalk; testes em
   `packages/chalk-grader/tests/`, sem a turma de exemplo.
 
 O chalk passa a questão para o motor como `chalk_grader.task.Task`
