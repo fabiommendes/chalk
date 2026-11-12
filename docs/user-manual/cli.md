@@ -143,7 +143,7 @@ $ chalk clear [OPTIONS]
 **Options**:
 
 * `-a, --all`: Clear every file chalk generates. For now, the same as --autograder.
-* `--autograder`: Clear only the autograder files (reports and data).
+* `--autograder`: Clear the cache of the autograder profiles (.chalk/cache).
 * `--help`: Show this message and exit.
 
 ## `chalk show`

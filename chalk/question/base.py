@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import sys
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Iterator
@@ -558,8 +559,7 @@ class BaseQuestion[Conf: models.BaseQuestion, Answer: AnyAnswer](RenderableQuest
             return
         for path in base.glob("tmp-*"):
             if path.is_dir():
-                print(path)
-                # shutil.rmtree(path, ignore_errors=True)
+                shutil.rmtree(path, ignore_errors=True)
 
     #
     # Private methods designed to be overriden
