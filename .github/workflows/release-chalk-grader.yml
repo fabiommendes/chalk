@@ -1,0 +1,42 @@
+# Publish chalk-grader to PyPI. Push a tag like `chalk-grader-v0.2.0`.
+#
+# PyPI uses trusted publishing: the "chalk-grader" project must list this
+# repository, this workflow file and the "pypi" environment as a trusted
+# publisher.
+name: Release chalk-grader
+
+on:
+  push:
+    tags:
+      - "chalk-grader-v*.*.*"
+
+jobs:
+  version:
+    name: Check the version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that the tag matches the package version
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("packages/chalk-grader/pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "${GITHUB_REF_NAME}" != "chalk-grader-v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version ${version}" >&2
+            exit 1
+          fi
+
+  check:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish to PyPI
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --package chalk-grader --out-dir dist
+      - run: uv publish dist/*

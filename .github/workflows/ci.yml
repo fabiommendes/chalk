@@ -1,0 +1,31 @@
+# Lint, tests and docs (`uv run task check`) on every push and pull request.
+# The release workflow calls this one before publishing chalk-grader.
+#
+# chalk takes mdq from a sibling checkout (`../../codehood/mdq/mdq-py`, see
+# `[tool.uv.sources]`), so the job clones mdq-spec at that path.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone mdq next to chalk
+        run: git clone --depth 1 https://github.com/fabiommendes/mdq-spec.git "$GITHUB_WORKSPACE/../../codehood/mdq"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install elm and elm-test
+        run: npm install -g elm@0.19.1-5 elm-test@0.19.1-revision17
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run task check

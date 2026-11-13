@@ -179,7 +179,7 @@ dev = [
 
 [[package]]
 name = "chalk-grader"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/chalk-grader" }
 dependencies = [
     { name = "gitignore-lib" },
@@ -562,7 +562,7 @@ wheels = [
 
 [[package]]
 name = "mdq"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "../../codehood/mdq/mdq-py" }
 dependencies = [
     { name = "linkify-it-py" },
