@@ -44,6 +44,8 @@ class FakeCodehood:
     responses: dict[str, dict[str, Any]] = field(default_factory=dict)
     submissions: list[dict[str, Any]] = field(default_factory=list)
     feedback: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    #: Mimics production, where GET feedback ignores the submission and lists all feedback.
+    leaky_feedback: bool = False
     #: Every request received: (method, path without query, body or None).
     requests: list[tuple[str, str, Any]] = field(default_factory=list)
     _server: ThreadingHTTPServer | None = None
@@ -247,6 +249,8 @@ class FakeCodehood:
             if not any(s["publicId"] == sid for s in self.submissions):
                 return send(404, {"code": "not-found", "message": "submission"})
             if method == "GET":
+                if self.leaky_feedback:
+                    return send(200, [f for fb in self.feedback.values() for f in fb.values()])
                 return send(200, list(self.feedback.get(sid, {}).values()))
             if method == "PUT":
                 return self._put(send, sid, body or {})

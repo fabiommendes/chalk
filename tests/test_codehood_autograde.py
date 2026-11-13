@@ -256,6 +256,25 @@ class TestSelection:
         assert [sid for sid, _ in server.puts] == [plain]
         assert set(server.feedback[human]) == {"ada"}
 
+    def test_feedback_of_other_submissions_does_not_cause_a_skip(self, course, server) -> None:
+        add_question(course)
+        server.add_exam("p1", [SLUG])
+        server.leaky_feedback = True
+        (other,) = server.add_attempt("eva", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
+        server.add_feedback(other, "ada", "1", grader="ada")
+        (plain,) = server.add_attempt("fabi", "p1", [(SLUG, WRONG, "PENDING_GRADE")])
+        autograde(server, "p1")
+        assert [sid for sid, _ in server.puts] == [plain]
+
+    def test_own_chalk_feedback_is_rewritten(self, course, server) -> None:
+        add_question(course)
+        server.add_exam("p1", [SLUG])
+        (sid,) = server.add_attempt("eva", "p1", [(SLUG, CORRECT, "PENDING_GRADE")])
+        server.add_feedback(sid, "chalk", "0", grader="ada", bot="runner")
+        autograde(server, "p1")
+        assert [s for s, _ in server.puts] == [sid]
+        assert server.feedback[sid]["chalk"]["score"] != "0"
+
     def test_human_feedback_on_an_older_submission_does_not_block_the_newest(
         self, course, server
     ) -> None:

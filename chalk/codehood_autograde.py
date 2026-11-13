@@ -487,13 +487,28 @@ def autograde_exam(
             sid = sub["publicId"]
             if newest.get((sub["response"], slug), ("", ""))[1] != sid:
                 continue
-            feedback = client.get(f"submission/{sid}/feedback")
-            if any(f.get("grader") for f in feedback):
+            if _has_human_feedback(client, sid):
                 item.human += 1
                 continue
             _grade_one(client, grader, prepared.tests, sub, item, dry_run)
             log(f"{slug}: {item.graded + len(item.manual) + len(item.errors)} done")
     return report
+
+
+def _has_human_feedback(client: CodehoodClient, sid: str) -> bool:
+    """
+    Whether a human already graded the submission.
+
+    Human feedback is an item with `grader` set and a `ref` other than `REF`
+    (the chalk's own feedback, which a new run overwrites). Items of other
+    submissions are ignored, since some servers list feedback regardless of
+    the submission in the path; an item without `submission` is kept.
+    """
+    return any(
+        f.get("grader") and f.get("ref") != REF
+        for f in client.get(f"submission/{sid}/feedback")
+        if f.get("submission", sid) == sid
+    )
 
 
 def _grade_one(
