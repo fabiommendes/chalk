@@ -48,7 +48,9 @@ __all__ = [
     "Report",
     "autograde_exam",
     "extract_code",
+    "find_course_root",
     "find_graders",
+    "find_question_grader",
     "grade_answer",
     "load_course",
     "make_grader",
@@ -143,36 +145,84 @@ def find_graders(root: Path) -> dict[str, FoundGrader]:
         return found
 
     for conf_path in sorted(base.rglob("grader.yaml")):
-        folder = conf_path.parent
-        relative = folder.relative_to(base)
-        if relative == Path("."):
-            raise GraderLayoutError(f"{conf_path}: a grader lives in graders/<path>/")
-        question = (root / "questions" / relative).with_name(relative.name + ".md")
-        if not question.is_file():
-            raise GraderLayoutError(f"grader {folder} has no question (expected {question})")
-
-        front = _frontmatter(question)
-        slug = front.get("id")
-        if not isinstance(slug, str) or not slug:
-            raise GraderLayoutError(f"{question} has no `id` in its frontmatter")
-        if slug in found:
-            raise GraderLayoutError(f"question {slug!r} has two graders: {found[slug].folder}")
-
-        try:
-            conf = models.Autograder.model_validate(yaml.safe_load(conf_path.read_text()) or {})
-        except (yaml.YAMLError, pydantic.ValidationError) as e:
-            raise GraderLayoutError(f"{conf_path} (question {slug}): {e}") from None
-        if conf.profile is None:
-            profile = PROFILE_BY_HIGHLIGHT.get(str(front.get("highlight")))
-            if profile is None:
-                known = ", ".join(PROFILE_BY_HIGHLIGHT)
-                raise GraderLayoutError(
-                    f"question {slug}: no `profile` in {conf_path} and the `highlight` "
-                    f"of the question is not one of: {known}"
-                )
-            conf = conf.model_copy(update={"profile": profile})
-        found[slug] = FoundGrader(slug, folder, question, conf)
+        grader = _load_grader(root, conf_path)
+        if grader.slug in found:
+            raise GraderLayoutError(
+                f"question {grader.slug!r} has two graders: {found[grader.slug].folder}"
+            )
+        found[grader.slug] = grader
     return found
+
+
+def find_course_root(path: Path, /) -> Path | None:
+    """
+    The nearest ancestor of path (path itself excluded) with a codehood.toml,
+    or None. Does not read the file.
+    """
+    for parent in path.parents:
+        if (parent / "codehood.toml").is_file():
+            return parent
+    return None
+
+
+def find_question_grader(question: Path, /) -> FoundGrader | None:
+    """
+    The grader of a question file of a codehood course: for
+    <root>/questions/<path>.md, the one in <root>/graders/<path>/grader.yaml.
+
+    None when the file is not under questions/ of a course or there is no
+    grader.yaml. Does not scan the other graders, so a broken grader of
+    another question does not get in the way.
+
+    Raises:
+        GraderLayoutError: the grader.yaml is invalid, the question has no
+            `id`, or there is no profile (same rules as find_graders).
+    """
+    root = find_course_root(question)
+    if root is None or question.suffix != ".md":
+        return None
+    try:
+        relative = question.relative_to(root / "questions")
+    except ValueError:
+        return None
+    conf_path = root / "graders" / relative.with_suffix("") / "grader.yaml"
+    if not conf_path.is_file():
+        return None
+    return _load_grader(root, conf_path)
+
+
+def _load_grader(root: Path, conf_path: Path) -> FoundGrader:
+    """
+    The grader of a graders/<path>/grader.yaml, with its question.
+    """
+    base = root / "graders"
+    folder = conf_path.parent
+    relative = folder.relative_to(base)
+    if relative == Path("."):
+        raise GraderLayoutError(f"{conf_path}: a grader lives in graders/<path>/")
+    question = (root / "questions" / relative).with_name(relative.name + ".md")
+    if not question.is_file():
+        raise GraderLayoutError(f"grader {folder} has no question (expected {question})")
+
+    front = _frontmatter(question)
+    slug = front.get("id")
+    if not isinstance(slug, str) or not slug:
+        raise GraderLayoutError(f"{question} has no `id` in its frontmatter")
+
+    try:
+        conf = models.Autograder.model_validate(yaml.safe_load(conf_path.read_text()) or {})
+    except (yaml.YAMLError, pydantic.ValidationError) as e:
+        raise GraderLayoutError(f"{conf_path} (question {slug}): {e}") from None
+    if conf.profile is None:
+        profile = PROFILE_BY_HIGHLIGHT.get(str(front.get("highlight")))
+        if profile is None:
+            known = ", ".join(PROFILE_BY_HIGHLIGHT)
+            raise GraderLayoutError(
+                f"question {slug}: no `profile` in {conf_path} and the `highlight` "
+                f"of the question is not one of: {known}"
+            )
+        conf = conf.model_copy(update={"profile": profile})
+    return FoundGrader(slug, folder, question, conf)
 
 
 def _frontmatter(path: Path) -> dict[str, Any]:
@@ -239,20 +289,28 @@ def extract_code(text: str) -> str:
     return "\n".join(blocks) if blocks else text
 
 
-def make_grader(found: FoundGrader, course: CourseConfig) -> ProfileGrader:
+def make_grader(
+    found: FoundGrader,
+    root: Path,
+    *,
+    quiz_id: str = "codehood",
+    question_id: str | None = None,
+) -> ProfileGrader:
     """
-    The profile grader of a question. The profiles of chalk.toml are visible.
+    The profile grader of a question. root is the course root: profiles come
+    from its chalk.toml and the cache goes to <root>/.chalk/cache.
+    question_id defaults to found.slug. Both ids only label the run.
     """
     folder = found.folder
     template = folder / (found.conf.template or Path("template"))
     task = Task(
-        question_id=found.slug,
-        quiz_id="codehood",
+        question_id=question_id or found.slug,
+        quiz_id=quiz_id,
         root=folder,
         template=template if template.is_dir() else None,
     )
     assert found.conf.profile is not None
-    profile = resolve_profile(found.conf.profile, _user_profiles(course.root))
+    profile = resolve_profile(found.conf.profile, _user_profiles(root))
     return ProfileGrader(
         script=None,
         task=task,
@@ -260,7 +318,7 @@ def make_grader(found: FoundGrader, course: CourseConfig) -> ProfileGrader:
         name=found.conf.profile,
         profile=profile,
         solution=_solution(found),
-        cache_dir=course.root / ".chalk" / "cache",
+        cache_dir=root / ".chalk" / "cache",
     )
 
 
@@ -417,7 +475,7 @@ def autograde_exam(
         report.questions.append(item)
         log(f"{slug}: preparing the grader")
         try:
-            grader = make_grader(graders[slug], course)
+            grader = make_grader(graders[slug], course.root)
             prepared = grader.prepare()
             verify_reference(grader)
         except (PrepareError, ValueError, RuntimeError, OSError, NotImplementedError) as e:
@@ -510,7 +568,7 @@ def run_check(root: Path, folder: Path) -> None:
     import typer
 
     found = _find(root, folder)
-    grader = make_grader(found, load_course(root))
+    grader = make_grader(found, load_course(root).root)
     try:
         graded = verify_reference(grader)
     except (PrepareError, ValueError) as e:
@@ -526,7 +584,7 @@ def run_try(root: Path, folder: Path, file: Path) -> None:
     Grade a local file with a grader, as an answer, and show the result.
     """
     found = _find(root, folder)
-    grader = make_grader(found, load_course(root))
+    grader = make_grader(found, load_course(root).root)
     graded = grade_answer(grader, "try", file.read_text())
     if graded is None:
         _say(Text("Left for manual grading.", style="yellow"))

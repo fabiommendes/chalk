@@ -70,3 +70,19 @@ def test_show_answers_json(classroom) -> None:
 )
 def test_show_rejects(classroom, args) -> None:
     assert run(*args).exit_code != 0
+
+
+def test_show_question_from_source_outside_quiz(classroom) -> None:
+    bank = classroom / "questions"
+    bank.mkdir()
+    (bank / "brasil.md").write_text(
+        "---\nid: brasil\n---\n\nCapital do Brasil?\n\n- [*] [df] Brasília\n- [ ] [sp] São Paulo\n"
+    )
+    conf = classroom / "p1" / "conf.yaml"
+    conf.write_text(
+        conf.read_text().replace("  - id: q3\n", "  - id: q3\n    source: ../questions/brasil.md\n")
+    )
+
+    result = run("show", "p1/q3")
+    assert result.exit_code == 0, result.output
+    assert "questions/brasil.md" in result.output

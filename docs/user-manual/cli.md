@@ -377,7 +377,7 @@ $ chalk codehood autograde [OPTIONS] [EXAM[/QUESTION]]
 **Options**:
 
 * `-n, --dry-run`: Grade, but write nothing; show the distribution.
-* `--server URL`: Server URL. Default:  url.
+* `--server URL`: Server URL. Default: [server] url.
 * `--key-file FILE`: File with the key of the grading bot (BOT).
 * `--check GRADER`: Grade the reference solution of a grader folder. No server.
 * `--try GRADER FILE`: Grade a local file with a grader folder. No server.

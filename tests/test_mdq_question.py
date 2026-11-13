@@ -75,8 +75,14 @@ class TestAnswers:
         assert quiz.get_question("q1").validate_answer(answer) == "df"
 
     def test_multiple_choice_rejects_unknown_choice(self, quiz) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as info:
             quiz.get_question("q1").validate_answer("xx")
+        assert info.value.args[0].code == "unknown-choice"
+
+    def test_multiple_selection_rejects_unknown_choice(self, quiz) -> None:
+        with pytest.raises(ValueError) as info:
+            quiz.get_question("q2").validate_answer("dois, xx")
+        assert info.value.args[0].code == "unknown-choice"
 
     @pytest.mark.parametrize("answer", ["dois, tres", "[dois, tres]", ("dois", "tres"), "2, 3"])
     def test_multiple_selection_formats(self, quiz, answer) -> None:

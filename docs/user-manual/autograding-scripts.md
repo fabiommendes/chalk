@@ -692,19 +692,24 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 received = []
 
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         received.append(self.rfile.read(int(self.headers["Content-Length"])))
         self.send_response(201)
         self.end_headers()
 
+
 def report(*_):
     ok = any(json.loads(body) == {"name": "pen"} for body in received)
     failure = "" if ok else '<failure message="no POST with the new item"/>'
     with open(os.environ["CHALK_RESULT"], "w") as f:
-        f.write(f'<testsuite><testcase classname="api" name="creates_item">'
-                f'{failure}</testcase></testsuite>')
+        f.write(
+            f'<testsuite><testcase classname="api" name="creates_item">'
+            f"{failure}</testcase></testsuite>"
+        )
     sys.exit(0)
+
 
 signal.signal(signal.SIGTERM, report)
 HTTPServer(("127.0.0.1", 8080), Handler).serve_forever()

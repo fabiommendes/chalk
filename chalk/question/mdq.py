@@ -8,6 +8,8 @@ what is specific to chalk: value, autograder and answer suffix.
 
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +29,9 @@ from .base import BaseQuestion, empty_result, fail
 from .renderable import RenderableField
 
 if TYPE_CHECKING:
+    from chalk_grader.profile_grader import ProfileGrader
+
+    from ..codehood_autograde import FoundGrader
     from ..core.quiz import Quiz
 
 __all__ = ["MdqQuestion", "MDQ_SUFFIXES", "load_mdq_document", "mdq_question_id"]
@@ -99,14 +104,12 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
     # Answers
     #
     def validate_answer(self, answer: Any, /) -> AnyAnswer:
-        response = self.to_response(answer)
-        try:
-            self._document.score_response(response)
-        except ResponseError as e:
-            raise fail("invalid-response", str(e)) from e
-        except NotAutoGradable:
-            pass
-        return response
+        """
+        Convert the answer to an mdq response and check its references. An
+        answer outside the domain (``3.5`` for an integer) is valid: it is a
+        wrong answer, graded as such by ``grade_answer``.
+        """
+        return self.to_response(answer)
 
     def to_response(self, answer: Any, /) -> Any:
         """
@@ -116,6 +119,11 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
         if answer is None or (isinstance(answer, str) and not answer.strip()):
             raise empty_result()
 
+        response = self._convert_response(answer)
+        self._check_references(response)
+        return response
+
+    def _convert_response(self, answer: Any, /) -> Any:
         match self.type:
             case "multiple-choice":
                 return self._choice_id(answer)
@@ -145,6 +153,44 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
                 return answer
             case _:
                 return answer
+
+    def _check_references(self, response: Any, /) -> None:
+        """
+        Raise ValueError(Issue) with code "unknown-choice" when the response
+        refers to a choice, statement or blank the document does not have.
+
+        multiple-choice: the id; multiple-selection: each id; true-false: the
+        keys of the mapping (statement ids, in document.choices); fill-in: the
+        keys of the mapping (document.blanks[*].id). Other types and responses
+        of the wrong shape pass (mdq rejects the shape later).
+        """
+        document = self._document
+        if self.type in ("multiple-choice", "multiple-selection", "true-false"):
+            ids = [choice.id for choice in getattr(document, "choices", None) or []]
+            what = "one of the choices"
+        elif self.type == "fill-in":
+            ids = [blank.id for blank in getattr(document, "blanks", None) or []]
+            what = "a blank of the question"
+        else:
+            return
+
+        if self.type == "multiple-choice":
+            values = [response] if isinstance(response, str) else []
+        elif self.type == "multiple-selection":
+            values = (
+                [v for v in response if isinstance(v, str)]
+                if isinstance(response, Sequence) and not isinstance(response, str)
+                else []
+            )
+        else:
+            values = list(response) if isinstance(response, Mapping) else []
+
+        for value in values:
+            if value not in ids:
+                raise fail(
+                    "unknown-choice",
+                    f"Answer {value!r} is not {what}: {', '.join(map(str, ids))}",
+                )
 
     def _choice_id(self, answer: Any) -> Any:
         """
@@ -184,7 +230,7 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
         except NotAutoGradable:
             return None
         except ResponseError as e:
-            raise fail("invalid-response", str(e)) from e
+            return Graded(Decimal(0), feedback=f"Invalid answer, graded as wrong: {e}")
 
         feedback = "\n".join(result.feedback) or None
         return Graded(Decimal(str(result.score)), feedback=feedback)
@@ -196,10 +242,49 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
 
             return ScriptGrader(script=script, task=self.get_task(), conf=self.get_autograder())
 
+        found = self.find_course_grader()
+        if found is not None:
+            return _code_answer(self._course_profile_grader(found))
+
         def grader(id: StudentId, answer: Any, /, **kwargs: Any) -> Graded | None:
             return self.grade_answer(answer)
 
         return grader
+
+    def find_course_grader(self) -> FoundGrader | None:
+        """
+        The codehood grader of this question, when its file comes from
+        questions/<path>.md of a codehood course and graders/<path>/grader.yaml
+        exists. None for questions without a path.
+
+        Raises:
+            GraderLayoutError: see codehood_autograde.find_question_grader.
+        """
+        if self._path is None:
+            return None
+        from ..codehood_autograde import find_question_grader
+
+        return find_question_grader(self._path)
+
+    def _course_profile_grader(self, found: FoundGrader) -> ProfileGrader:
+        from ..codehood_autograde import find_course_root, make_grader
+
+        root = find_course_root(found.folder)
+        assert root is not None
+        return make_grader(found, root, quiz_id=self.quiz.id, question_id=self.id)
+
+    def get_reference_answer(self) -> AnyAnswer | None:
+        """
+        The answer key of the quiz or, failing that, the solution/ of the
+        codehood grader of the course.
+        """
+        answer = super().get_reference_answer()
+        if answer is not None:
+            return answer
+        found = self.find_course_grader()
+        if found is None:
+            return None
+        return self._course_profile_grader(found).solution  # type: ignore[return-value]
 
     #
     # Rendering
@@ -207,11 +292,36 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
     def _render_base_fields(self, plain: bool = False) -> Iterable[tuple[str, RenderableField]]:
         yield from super()._render_base_fields(plain)
         if self._path is not None:
-            yield "file", str(self._path.relative_to(self.quiz.root))
+            yield "file", str(self._display_path(self._path))
+
+    def _display_path(self, path: Path) -> Path:
+        """
+        Path shown to the user: relative to the classroom root when the file is
+        inside it, else relative to the quiz (sources can live outside the quiz).
+        """
+        try:
+            return path.relative_to(self.quiz.classroom.root)
+        except ValueError:
+            return Path(os.path.relpath(path, self.quiz.root))
 
     def _render_base_sections(self, plain: bool = False) -> Iterable[RenderableType]:
         yield from super()._render_base_sections(plain)
         yield Text(self._document.render())
+
+
+def _code_answer(grader: ProfileGrader) -> Grader[Any]:
+    """
+    Wrap the grader so text answers go through extract_code, as in
+    `chalk codehood autograde`: only the fenced code blocks are graded.
+    """
+    from ..codehood_autograde import extract_code
+
+    def graded(id: StudentId, answer: Any, /, **kwargs: Any) -> Graded | None:
+        if isinstance(answer, str):
+            answer = extract_code(answer)
+        return grader(re.sub(r"[^\w-]", "_", id), answer, **kwargs)
+
+    return graded
 
 
 def mdq_question_id(path: Path) -> QuestionId | None:

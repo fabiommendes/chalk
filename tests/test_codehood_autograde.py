@@ -23,6 +23,7 @@ import shutil
 from fractions import Fraction
 from pathlib import Path
 
+import mdq
 import pytest
 from typer.testing import CliRunner
 
@@ -76,6 +77,15 @@ def write(path: Path, text: str) -> Path:
     return path
 
 
+def question_text(slug: str, highlight: str | None = "prolog") -> str:
+    """
+    A question file that mdq accepts. `highlight` is only valid in a code
+    question, and a question needs a body tag (`[essay]`) to have a stem.
+    """
+    front = f"id: {slug}\n" + (f"content: code\nhighlight: {highlight}\n" if highlight else "")
+    return f"---\n{front}---\n\nEscreva fat/2.\n\n[essay]\n"
+
+
 def add_question(
     root: Path,
     slug: str = SLUG,
@@ -89,8 +99,10 @@ def add_question(
     """
     questions/<where>.md and graders/<where>/ with the layout of the design.
     """
-    front = f"id: {slug}\n" + (f"highlight: {highlight}\n" if highlight else "")
-    write(root / "questions" / f"{where}.md", f"---\n{front}---\n\nEscreva fat/2.\n")
+    path = root / "questions" / f"{where}.md"
+    write(path, question_text(slug, highlight))
+    loaded = mdq.load(path, kind="question", ids="fill")
+    assert loaded.document is not None, loaded.diagnostics
     folder = root / "graders" / where
     write(folder / "grader.yaml", grader_yaml)
     write(folder / "template" / "tests.pl", tests)
@@ -155,7 +167,7 @@ class TestFindGraders:
 
     def test_question_without_grader_is_not_an_error(self, course) -> None:
         add_question(course)
-        write(course / "questions" / "manual.md", "---\nid: manual\n---\n\nTexto.\n")
+        write(course / "questions" / "manual.md", "---\nid: manual\n---\n\nTexto.\n\n[essay]\n")
         assert set(find_graders(course)) == {SLUG}
 
     def test_grader_without_question_is_an_error(self, course) -> None:

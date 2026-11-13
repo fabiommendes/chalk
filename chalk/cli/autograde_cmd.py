@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from functools import partial
 from pathlib import Path
 from typing import Annotated, Any
@@ -13,6 +14,8 @@ from rich.text import Text
 
 from ..core import Classroom, Question, Student
 from ..core.grader import DEFAULT_TIMEOUT, Grader, GraderKwargs, is_score
+from ..core.issue import error_message
+from ..core.models import StudentId
 from ..core.score import rich_render_percent
 from ..question import render_answer
 from .util import (
@@ -359,6 +362,7 @@ def run_autograder(
     grades = question.quiz.grades
     submissions = question.quiz.submissions
     has_changed = False
+    invalid: list[StudentId] = []
 
     for student in students:
         score = grades.get_score(student=student, question=question)
@@ -371,7 +375,12 @@ def run_autograder(
             info(f"already graded ({score})", style="dim")
             continue
 
-        ans: Any = question.validate_answer(answer)
+        try:
+            ans: Any = question.validate_answer(answer)
+        except ValueError as e:
+            rich.print(Text(f"invalid answer: {error_message(e)}", style="red"))
+            invalid.append(student.id)
+            continue
         graded = grader(student.id, ans, **grader_kwargs)
         if graded is None:
             show("not graded.", style="yellow")
@@ -395,3 +404,10 @@ def run_autograder(
         )
         if has_changed and not dry_run:
             grades.save()
+
+    if invalid:
+        rich.print(
+            Text(f"{len(invalid)} answer(s) not graded: {', '.join(invalid)}", style="red"),
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)

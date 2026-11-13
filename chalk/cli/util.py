@@ -6,7 +6,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import rich
+import typer
 from rich.prompt import Prompt
+from rich.text import Text
 
 if TYPE_CHECKING:
     pass
@@ -20,6 +22,7 @@ def safe[R, **P](func: Callable[P, R]) -> Callable[P, R]:
     import traceback
 
     from ..core import ChalkErrorEnum
+    from ..core.issue import error_message
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):  # type: ignore
@@ -28,8 +31,13 @@ def safe[R, **P](func: Callable[P, R]) -> Callable[P, R]:
         except ChalkErrorEnum as e:
             e.print()
             raise SystemExit(1)
+        except (typer.Exit, typer.Abort):
+            raise
         except Exception as e:
-            rich.print(f"[b red]Error:[/] {e}", file=sys.stderr)
+            rich.print(
+                Text.assemble(("Error: ", "b red"), error_message(e)),
+                file=sys.stderr,
+            )
             if is_debug_mode():
                 traceback.print_exc()
             raise SystemExit(1)

@@ -113,6 +113,9 @@ class Issue:
             self.message or "",
         )
 
+    def __str__(self) -> str:
+        return self.message or self.code
+
     def with_scopes(self, scopes: Iterable[str]) -> Self:
         """
         Return a new issue with the given scope added.
@@ -248,13 +251,6 @@ def list_of_issues(
         return [Issue.error(code, obj, scopes=scopes)]
     elif isinstance(obj, int):
         return [Issue.error(f"error-{obj}", f"Error: {obj}", scopes=scopes)]
-    elif isinstance(obj, Iterable):
-        issues = []
-        for item in obj:
-            issues.extend(list_of_issues(item, scopes, severity))
-        if not issues:
-            return [Issue.error(code, "Unknown error.", scopes=scopes)]
-        return issues
     elif isinstance(obj, Mapping):
         issues = []
         for key, value in obj.items():
@@ -266,6 +262,13 @@ def list_of_issues(
                     code=f"{code}{key}",
                 ),
             )
+        return issues
+    elif isinstance(obj, Iterable):
+        issues = []
+        for item in obj:
+            issues.extend(list_of_issues(item, scopes, severity))
+        if not issues:
+            return [Issue.error(code, "Unknown error.", scopes=scopes)]
         return issues
     elif isinstance(obj, ValueError):
         return list_of_issues(obj.args, scopes, severity)
@@ -279,3 +282,22 @@ def list_of_issues(
         return [issue]
     else:
         return [Issue.error(code, f"Unknown error: {obj}", scopes=scopes)]
+
+
+def error_message(exc: BaseException, /) -> str:
+    """
+    Human readable message of an exception. Unwraps ValueError(Issue) and
+    ValueError([Issue, ...]) into the messages of the issues, joined by
+    "; ". Any other exception gives str(exc).
+    """
+    if isinstance(exc, ValueError) and exc.args:
+        payload = exc.args[0] if len(exc.args) == 1 else exc.args
+        if isinstance(payload, Issue):
+            return str(payload)
+        if (
+            isinstance(payload, (list, tuple))
+            and payload
+            and all(isinstance(item, Issue) for item in payload)
+        ):
+            return "; ".join(str(item) for item in payload)
+    return str(exc)

@@ -60,7 +60,7 @@ def autograde(
     ] = False,
     server: Annotated[
         str | None,
-        typer.Option("--server", metavar="URL", help="Server URL. Default: [server] url."),
+        typer.Option("--server", metavar="URL", help="Server URL. Default: \\[server] url."),
     ] = None,
     key_file: Annotated[
         Path | None,

@@ -116,3 +116,20 @@ course/
 - `-n/--dry-run` writes nothing and prints the distribution of the scores.
 - `--check` grades the reference solution of a grader folder, and `--try`
   grades a local file. Neither needs a server or a key.
+
+### Reusing a course question in a quiz
+
+A quiz of the same repository can reuse the question with `source:` in its
+`conf.yaml`:
+
+```yaml
+questions:
+  - id: fatorial
+    source: ../questions/logico/fatorial.md
+```
+
+`chalk autograde p1/fatorial` then grades with `graders/logico/fatorial/`,
+the same grader (and the same code fences rule) as `chalk codehood autograde`,
+and `--check` uses its `solution/`. An `autograde.*` script in the question
+folder of the quiz has priority over the course grader. The `[profiles]` come
+from the `chalk.toml` at the root of the course.

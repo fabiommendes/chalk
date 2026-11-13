@@ -213,8 +213,8 @@ class BaseQuestion(BaseModel):
         Custom serialization to ensure that the `type` field is always included in the output.
         """
         data = handler(self)
-        if "type" not in data:
-            data = {"type": getattr(self, "type", None), **data}
+        if "type" not in data and getattr(self, "type", None) is not None:
+            data = {"type": self.type, **data}
         return data
 
 

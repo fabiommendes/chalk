@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from ..core.answer import AnyAnswer
 from ..core.answer import serialize_any_answer as _serialize_answer
+from ..core.issue import error_message
 from .base import Generic
 from .mdq import MdqQuestion
 from .repo import Repo
@@ -61,7 +62,7 @@ def render_answer(
         validated: Any = question.validate_answer(answer)
         return question.render_answer(validated, plain=plain)
     except ValueError as e:
-        return Group(Text("Invalid answer", style="bold red"), str(e))
+        return Group(Text("Invalid answer", style="bold red"), error_message(e))
 
 
 def serialize_answer(
