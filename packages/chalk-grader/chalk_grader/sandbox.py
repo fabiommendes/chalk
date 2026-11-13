@@ -95,14 +95,18 @@ def bwrap_command(
             args += ["--tmpfs", path]
 
     reexposed = [*_path_dirs(env), *_python_dirs(), *readable]
+    bound: list[str] = []
     for path in _dedup(p.resolve() for p in reexposed):
         if path.exists() and _inside(path, hidden):
             args += ["--ro-bind", str(path), str(path)]
+            bound.append(str(path))
 
     # A symlink inside a hidden directory (uv links cpython-3.13 to
     # cpython-3.13.5) is recreated, so paths through it still work.
-    for path in _dedup(Path(os.path.abspath(p)) for p in reexposed):
-        if path.is_symlink() and _inside(path, hidden):
+    links = [*reexposed, *_python_links()]
+    for path in _symlinks(Path(os.path.abspath(p)) for p in links):
+        # Links inside a bound directory are already there.
+        if _inside(path, hidden) and not _inside(path, bound):
             args += ["--symlink", os.readlink(path), str(path)]
 
     for path in _dedup(p.resolve() for p in [workdir, *writable]):
@@ -128,6 +132,33 @@ def _path_dirs(env: dict[str, str] | os._Environ[str]) -> list[Path]:
 
 def _python_dirs() -> list[Path]:
     return [Path(sys.prefix), Path(sys.base_prefix), Path(sys.executable).resolve().parent]
+
+
+def _python_links() -> list[Path]:
+    """
+    The paths the symlinks of the running Python point to, unresolved: a venv
+    python may reach the interpreter through a link sys.base_prefix skips.
+    """
+    paths: list[Path] = []
+    path = Path(sys.executable)
+    for _ in range(40):
+        if not path.is_symlink():
+            break
+        path = path.parent / os.readlink(path)
+        paths.append(Path(os.path.abspath(path)))
+    return paths
+
+
+def _symlinks(paths: Iterable[Path]) -> list[Path]:
+    """
+    The symlinks among the paths and their parents, each once.
+    """
+    found: dict[Path, None] = {}
+    for path in paths:
+        for candidate in [*reversed(path.parents), path]:
+            if candidate.is_symlink():
+                found[candidate] = None
+    return list(found)
 
 
 def _inside(path: Path, roots: Sequence[str]) -> bool:

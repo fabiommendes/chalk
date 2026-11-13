@@ -80,6 +80,37 @@ class TestCommand:
         assert args[i + 1 : i + 3] == ["python-3.13.5", str(tmp_path / "python-3.13")]
         assert args[args.index(str(tmp_path / "python-3.13.5")) - 1] == "--ro-bind"
 
+    def test_recreates_symlinked_parent_of_a_readable_path(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.HIDDEN", (str(tmp_path),))
+        (tmp_path / "python-3.13.5" / "bin").mkdir(parents=True)
+        (tmp_path / "python-3.13").symlink_to("python-3.13.5")
+        args = bwrap_command(
+            "true", workdir=Path("/w"), readable=[tmp_path / "python-3.13" / "bin"], env={}
+        )
+        i = args.index("--symlink")
+        assert args[i + 1 : i + 3] == ["python-3.13.5", str(tmp_path / "python-3.13")]
+
+    def test_follows_the_links_of_the_venv_python(self, monkeypatch, tmp_path) -> None:
+        # uv points the venv at a minor-version link (cpython-3.13 -> cpython-3.13.18)
+        # while sys.base_prefix may already be the resolved directory.
+        monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
+        monkeypatch.setattr("chalk_grader.sandbox.HIDDEN", (str(tmp_path),))
+        real = tmp_path / "cpython-3.13.18"
+        (real / "bin").mkdir(parents=True)
+        (real / "bin" / "python3.13").touch()
+        (tmp_path / "cpython-3.13").symlink_to(real)
+        venv = tmp_path / "venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").symlink_to(tmp_path / "cpython-3.13" / "bin" / "python3.13")
+        (venv / "bin" / "python3").symlink_to("python")
+        monkeypatch.setattr("sys.executable", str(venv / "bin" / "python3"))
+        monkeypatch.setattr("sys.prefix", str(venv))
+        monkeypatch.setattr("sys.base_prefix", str(real))
+        args = bwrap_command("true", workdir=Path("/w"), env={})
+        links = [args[i + 1 : i + 3] for i, a in enumerate(args) if a == "--symlink"]
+        assert links == [[str(real), str(tmp_path / "cpython-3.13")]]
+
     def test_overlays_come_after_workdir(self, monkeypatch) -> None:
         monkeypatch.setattr("chalk_grader.sandbox.check_bwrap", lambda: "bwrap")
         args = bwrap_command(
