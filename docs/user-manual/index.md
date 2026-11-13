@@ -16,6 +16,11 @@ codehood only reads its own files (`codehood.toml`, `README.md`,
 `resources/`), and chalk only treats as a quiz a directory with a
 `conf.yaml`. Both read `roster.csv`, in the format described in the README.
 
+If the directory has a `codehood.toml`, `chalk init` adds `chalk.toml` to the
+course's `.codehoodignore`, and `chalk quiz create ID` adds `ID/`. Lines
+already listed are not repeated, and the other lines are kept. Without a
+`codehood.toml`, chalk does not touch `.codehoodignore`.
+
 `chalk codehood grades` writes one column per quiz to `grades.csv`, with the
 quiz grade in percent, keyed by the roster's id column (`school_id` by
 default). Columns that are not quizzes and rows of students outside the

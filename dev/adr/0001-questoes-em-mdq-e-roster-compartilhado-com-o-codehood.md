@@ -137,3 +137,11 @@ Propostas, ainda sem decisão:
   até lá, o roster é mantido à mão ou com `chalk roster import`.
 - Nota de questão aberta corrigida no chalk enviada como `Feedback` do
   codehood. Depende de API e de `codehood pull`, que não existem.
+
+## Atualização (2026-11-12)
+
+Quando a turma mora num curso codehood (existe `codehood.toml` na raiz),
+`chalk init` acrescenta `chalk.toml` ao `.codehoodignore` e
+`chalk quiz create ID` acrescenta `ID/`. Sem `codehood.toml`, o chalk não toca
+o `.codehoodignore`. Motivo: o `codehood push` listava os arquivos do chalk
+como "not pushed". Entradas já presentes não se repetem.

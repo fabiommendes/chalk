@@ -6,6 +6,7 @@ import rich
 import typer
 
 from .. import assets, env
+from ..codehood import add_codehoodignore
 from ..core.classroom import is_project_root
 from ..core.roster import SHARED_COLUMNS
 from .util import safe
@@ -58,3 +59,6 @@ def init(
     for dir in ["reports", "data", "scripts"]:
         if not (path := base / dir).exists():
             path.mkdir()
+
+    if add_codehoodignore(base, "chalk.toml"):
+        rich.print("Updated .codehoodignore")

@@ -63,6 +63,9 @@ Uma turma pode ser ao mesmo tempo projeto chalk e curso codehood. Regras em
   de quiz do `grades.csv` (`chalk codehood grades`).
 - Ao salvar `roster.csv`, preserve colunas desconhecidas, a ordem das colunas
   e as linhas sem id.
+- Com `codehood.toml` na raiz da turma, `chalk init` acrescenta `chalk.toml` ao
+  `.codehoodignore` do curso, e `chalk quiz create ID` acrescenta `ID/`. Sem
+  `codehood.toml`, não toca nele.
 
 ## Armadilhas conhecidas
 

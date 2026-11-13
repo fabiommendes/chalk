@@ -9,7 +9,10 @@ Classroom repositories), either automatically or by hand.
 
 Chalk can share a repository with a codehood course:
 both read the same `roster.csv`, and `chalk codehood grades` writes the quiz
-grades to the `grades.csv` that codehood publishes.
+grades to the `grades.csv` that codehood publishes. When the classroom sits in
+a directory with a `codehood.toml`, `chalk init` and `chalk quiz create` add
+their paths (`chalk.toml`, each quiz directory) to the course's
+`.codehoodignore`, so `codehood push` skips them.
 
 
 Installation

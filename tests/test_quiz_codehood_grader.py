@@ -40,8 +40,17 @@ def course(classroom: Path) -> Path:
     return classroom
 
 
+_quizzes: list = []
+
+
 def question():
-    return Classroom.load().get_quiz("p1").get_question("fat")
+    """
+    The question `fat`. A question only keeps a weak reference to its quiz,
+    so the quiz is kept alive here.
+    """
+    quiz = Classroom.load().get_quiz("p1")
+    _quizzes.append(quiz)
+    return quiz.get_question("fat")
 
 
 class TestFindQuestionGrader:

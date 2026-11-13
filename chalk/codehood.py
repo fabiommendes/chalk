@@ -22,10 +22,19 @@ from .util.path import write_text
 if TYPE_CHECKING:
     from .core.classroom import Classroom
 
-__all__ = ["CODEHOOD_ID_COLUMNS", "GradesExport", "export_grades", "quiz_percentages"]
+__all__ = [
+    "CODEHOOD_ID_COLUMNS",
+    "GradesExport",
+    "add_codehoodignore",
+    "export_grades",
+    "quiz_percentages",
+]
 
 #: Headers codehood accepts as the first column of grades.csv.
 CODEHOOD_ID_COLUMNS = ("school_id", "username", "github", "email")
+
+#: File at the root of a codehood course that lists the paths `codehood push` skips.
+CODEHOODIGNORE = ".codehoodignore"
 
 
 @dataclass
@@ -117,6 +126,31 @@ def export_grades(classroom: Classroom, path: Path | None = None) -> GradesExpor
         kept_rows=sum(1 for id in by_id if id not in roster) + len(others),
         kept_columns=kept_columns,
     )
+
+
+def add_codehoodignore(root: Path, pattern: str, /) -> bool:
+    """
+    Add a gitignore pattern to the .codehoodignore of the course at root, so
+    `codehood push` skips it. Does nothing if root has no codehood.toml.
+
+    A line that already matches pattern, ignoring the spaces around it, is not
+    added again. Other lines and comments are kept, and the file ends with a
+    newline.
+
+    Returns:
+        True if the file was written, False if nothing changed.
+    """
+    if not (root / "codehood.toml").is_file():
+        return False
+
+    path = root / CODEHOODIGNORE
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    if pattern in (line.strip() for line in text.splitlines()):
+        return False
+    if text and not text.endswith("\n"):
+        text += "\n"
+    write_text(path, f"{text}{pattern}\n", rotate=False)
+    return True
 
 
 def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]], str]:

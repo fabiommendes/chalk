@@ -8,6 +8,7 @@ import opt
 import rich
 import typer
 
+from ..codehood import add_codehoodignore
 from ..core import Classroom, Quiz, models
 from ..core.decimal import as_chalk_decimal, render_decimal
 from ..env import ask_optional_string
@@ -95,6 +96,8 @@ def create(
 
     quiz = Quiz(quiz_id, conf, cls)
     quiz.save()
+    if add_codehoodignore(cls.root, f"{quiz_id}/"):
+        rich.print("Updated .codehoodignore")
     rich.print(quiz)
 
 
