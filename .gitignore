@@ -11,3 +11,7 @@ wheels/
 .venv
 .coverage
 .stignore
+# Tool caches
+.base-ast/
+.base-ast-cache/
+.serena/
