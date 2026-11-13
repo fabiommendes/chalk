@@ -314,6 +314,9 @@ def test_elm(elm_template, tmp_path, sandbox, tmp_path_factory) -> None:
     graded = g("s2", make_tree(tmp_path / "s", elm_calc(sub="0")))
     assert graded.score == Fraction(2, 3)
     assert "CalcTest Calc::sub: 1 was not equal to 0" in (graded.feedback or "")
+    assert graded.cases is not None
+    failed = [c.key for c in graded.cases if not c.passed]
+    assert failed == [("CalcTest Calc", "sub")]
 
     broken = make_tree(tmp_path / "b", elm_calc(sub="a -"))
     assert g("s3", broken).score == dq.BuildError()

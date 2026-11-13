@@ -14,7 +14,7 @@ from logging import getLogger
 from pathlib import Path
 
 from . import disqualification as dq
-from .graded import Graded
+from .graded import CaseResult, Graded
 from .result_extractor import MAX_RESULT_SIZE
 from .scoring import Scorer, ScoringError
 
@@ -237,19 +237,22 @@ def _graded(
     if errors:
         lines += ["Errors:", *errors]
     feedback = "\n".join(lines) or None
-    if scorer is None:
-        return Graded(Fraction(len(expected) - len(failures), len(expected)), feedback=feedback)
-
-    tests = [
-        {
-            "name": name,
-            "passed": key not in failures,
-            "message": (failures[key] or None) if key in failures else None,
-        }
+    cases = tuple(
+        CaseResult(
+            key=key,
+            name=name,
+            passed=key not in failures,
+            message=(failures[key] or None) if key in failures else None,
+        )
         for key, name in expected.items()
-    ]
+    )
+    if scorer is None:
+        score = Fraction(len(expected) - len(failures), len(expected))
+        return Graded(score, feedback=feedback, cases=cases)
+
+    tests = [{"name": c.name, "passed": c.passed, "message": c.message} for c in cases]
     try:
-        return Graded(scorer(tests, list(expected.values())), feedback=feedback)
+        return Graded(scorer(tests, list(expected.values())), feedback=feedback, cases=cases)
     except ScoringError as e:
         return Graded(dq.Error(), feedback=str(e))
 

@@ -73,6 +73,25 @@ class TestScore:
         )
         assert score_report(src, self.expected).score == 0
 
+    def test_cases_follow_the_expected_tests(self) -> None:
+        src = junit(
+            '<testcase classname="tests.test_a" name="test_x"><failure message="boom"/></testcase>',
+            '<testcase classname="tests.test_fake" name="test_1"/>',
+        )
+        cases = score_report(src, self.expected).cases
+        assert cases is not None
+        assert [(c.key, c.passed, c.message) for c in cases] == [
+            (self.keys[0], False, "boom"),
+            (self.keys[1], False, "(not run)"),
+        ]
+        assert cases[0].name == "tests.test_a::test_x"
+
+    def test_cases_with_a_scorer(self) -> None:
+        src = junit('<testcase classname="tests.test_a" name="test_x"/>')
+        graded = score_report(src, self.expected, scorer=lambda tests, expected: Fraction(1))
+        assert graded.cases is not None
+        assert [c.passed for c in graded.cases] == [True, False]
+
     def test_unknown_tests_are_ignored(self) -> None:
         src = junit(
             '<testcase classname="tests.test_a" name="test_x"/>',

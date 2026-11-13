@@ -90,7 +90,9 @@ class ScriptGrader:
 
         if result.score is None:
             return None
-        return Graded(result.score, feedback=result.feedback, notes=result.notes)
+        return Graded(
+            result.score, feedback=result.feedback, notes=result.notes, cases=result.cases
+        )
 
     def run_in(
         self,

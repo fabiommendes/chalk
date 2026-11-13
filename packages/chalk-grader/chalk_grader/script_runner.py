@@ -19,7 +19,7 @@ from typing import Any
 from . import disqualification as dq
 from . import models
 from .disqualification import Disqualified
-from .graded import Graded
+from .graded import CaseResult, Graded
 from .repo import Repo
 from .result_extractor import extract_result_from_file
 from .sandbox import bwrap_command
@@ -62,6 +62,8 @@ class Result:
     stdout: str | None = None
     #: Notes for the teacher, never shown to the student.
     notes: str | None = None
+    #: Outcome of each expected test, when the result came from a test report.
+    cases: tuple[CaseResult, ...] | None = None
 
     def __bool__(self) -> bool:
         return self.return_code == 0
@@ -211,6 +213,7 @@ class ScriptRunner:
             stdout=stdout,
             feedback=result.feedback,
             score=result.score,
+            cases=result.cases,
         )
 
     def _run_to_stdout(self) -> tuple[bool, str]:
