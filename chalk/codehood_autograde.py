@@ -1,5 +1,7 @@
 """
-Grade the code answers of a Codehood exam with the autograder profiles.
+Grade the answers of a Codehood exam: the code answers with the autograder
+profiles, and the objective ones (multiple choice, true or false...) with the
+answer key of the mdq question.
 
 The course repository holds `codehood.toml`, `questions/<path>.md` and
 `graders/<path>/` for each question that has a grader:
@@ -11,10 +13,15 @@ The course repository holds `codehood.toml`, `questions/<path>.md` and
 
 The server slug of a question is the `id` of its frontmatter. The answers
 are read and the grades written through the REST API, see codehood_api.py.
+
+A question without a grader is objective when `questions/` has an mdq file
+with its `id` and mdq can grade it. The local file must be the one the server
+has: its md5 is compared with the `version` of the question.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tomllib
@@ -22,11 +29,14 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from fractions import Fraction
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+import mdq.models as mdqm
 import pydantic
 import yaml
+from mdq.errors import NotAutoGradable, ResponseError
 from rich import get_console
 from rich.text import Text
 
@@ -38,6 +48,7 @@ from .codehood_api import ApiError, CodehoodClient
 from .core import disqualification as dq
 from .core import models
 from .core.grader import Graded
+from .question.mdq import check_references, load_mdq_document
 
 __all__ = [
     "BOT_KEY_VAR",
@@ -50,8 +61,10 @@ __all__ = [
     "extract_code",
     "find_course_root",
     "find_graders",
+    "find_objective_questions",
     "find_question_grader",
     "grade_answer",
+    "grade_objective",
     "load_course",
     "make_grader",
     "read_key",
@@ -455,7 +468,8 @@ def autograde_exam(
         if question not in slugs:
             raise ValueError(f"question {question!r} is not in exam {exam!r}")
         slugs = [question]
-    slugs = [s for s in slugs if s in graders]
+    objective = find_objective_questions(course.root, [s for s in slugs if s not in graders])
+    slugs = [s for s in slugs if s in graders or s in objective]
 
     report = Report()
     if not slugs:
@@ -473,14 +487,25 @@ def autograde_exam(
     for slug in slugs:
         item = QuestionReport(slug)
         report.questions.append(item)
-        log(f"{slug}: preparing the grader")
-        try:
-            grader = make_grader(graders[slug], course.root)
-            prepared = grader.prepare()
-            verify_reference(grader)
-        except (PrepareError, ValueError, RuntimeError, OSError, NotImplementedError) as e:
-            item.aborted = str(e)
-            continue
+        if slug in graders:
+            log(f"{slug}: preparing the grader")
+            try:
+                grader = make_grader(graders[slug], course.root)
+                prepared = grader.prepare()
+                verify_reference(grader)
+            except (PrepareError, ValueError, RuntimeError, OSError, NotImplementedError) as e:
+                item.aborted = str(e)
+                continue
+            grade = partial(_grade_one, client, grader, prepared.tests, item=item, dry_run=dry_run)
+
+        else:
+            try:
+                document = _published_document(client, slug, objective[slug])
+            except (ValueError, ApiError) as e:
+                item.aborted = str(e)
+                continue
+
+            grade = partial(_grade_objective_one, client, document, item=item, dry_run=dry_run)
 
         submissions = client.get("submission", exam=exam, question=slug, statuses=list(STATUSES))
         for sub in submissions:
@@ -490,9 +515,89 @@ def autograde_exam(
             if _has_human_feedback(client, sid):
                 item.human += 1
                 continue
-            _grade_one(client, grader, prepared.tests, sub, item, dry_run)
+            grade(sub)
             log(f"{slug}: {item.graded + len(item.manual) + len(item.errors)} done")
     return report
+
+
+#
+# Objective questions
+#
+def find_objective_questions(root: Path, slugs: list[str]) -> dict[str, list[Path]]:
+    """
+    The mdq files of questions/ whose frontmatter `id` is one of the slugs,
+    by slug. Only Markdown files are looked at, and the ones with an invalid
+    frontmatter are ignored.
+    """
+    found: dict[str, list[Path]] = {}
+    base = root / "questions"
+    if not slugs or not base.is_dir():
+        return found
+    for path in sorted(base.rglob("*.md")):
+        try:
+            slug = _frontmatter(path).get("id")
+        except (GraderLayoutError, OSError, UnicodeDecodeError):
+            continue
+        if isinstance(slug, str) and slug in slugs:
+            found.setdefault(slug, []).append(path)
+
+    # Essays and code without tests are not for the runner.
+    return {
+        slug: paths
+        for slug, paths in found.items()
+        if len(paths) > 1 or _is_objective(paths[0], slug)
+    }
+
+
+def _is_objective(path: Path, slug: str) -> bool:
+    try:
+        document = load_mdq_document(path, slug)
+    except ValueError:
+        return True  # reported when the question is graded
+    return document.type != "code" and document.automation != "manual"
+
+
+def _published_document(client: CodehoodClient, slug: str, paths: list[Path]) -> mdqm.Question:
+    """
+    The mdq document of the local file of a question, if it is the version
+    published on the server.
+
+    Raises:
+        ValueError: there are two files for the question, the file is invalid
+            or it is not the published version.
+        ApiError: the server refused the request.
+    """
+    if len(paths) > 1:
+        raise ValueError(f"question {slug!r} has two files: {', '.join(map(str, paths))}")
+    path = paths[0]
+    document = load_mdq_document(path, slug)
+    local = f"md5:{hashlib.md5(path.read_bytes()).hexdigest()}"
+    server = client.get(f"question/{slug}").get("version")
+    if server != local:
+        raise ValueError(
+            f"{path} is not the version on the server ({local} here, {server} there): "
+            "push the question first. Not graded"
+        )
+    return document
+
+
+def grade_objective(document: mdqm.Question, response: Any) -> Graded | None:
+    """
+    Grade the response of a codehood submission (already in the response
+    shapes of mdq) with the answer key of the document. None leaves the answer
+    for manual grading.
+
+    Raises:
+        ValueError: the response is not valid for the question.
+    """
+    try:
+        check_references(document, response)
+        result = document.score_response(response)
+    except NotAutoGradable:
+        return None
+    except ResponseError as e:
+        raise ValueError(f"invalid answer: {e}") from None
+    return Graded(Fraction(str(result.score)).limit_denominator(1000), "\n".join(result.feedback))
 
 
 def _has_human_feedback(client: CodehoodClient, sid: str) -> bool:
@@ -552,11 +657,43 @@ def _grade_one(
         item.suspicious += 1
 
 
+def _grade_objective_one(
+    client: CodehoodClient,
+    document: mdqm.Question,
+    sub: dict[str, Any],
+    item: QuestionReport,
+    dry_run: bool,
+) -> None:
+    sid = sub["publicId"]
+    try:
+        graded = grade_objective(document, sub.get("payload"))
+    except ValueError as e:
+        item.errors.append(f"{sid}: {e}")
+        return
+    if graded is None:
+        item.manual.append(sid)
+        return
+    score = _fraction(Fraction(graded.score))
+    if not dry_run:
+        body: dict[str, Any] = {"ref": REF, "score": score}
+        if graded.feedback:
+            body["feedback"] = graded.feedback
+        try:
+            client.put(f"submission/{sid}/feedback", body)
+        except ApiError as e:
+            item.errors.append(f"{sid}: {e}")
+            return
+    item.graded += 1
+    item.scores[_bucket(Fraction(score))] += 1
+
+
 def _bucket(score: Fraction) -> str:
     """
     The label of a score in the distribution: 0, 1 or a range in tenths.
     """
-    if score <= 0:
+    if score < 0:
+        return "<0"
+    if score == 0:
         return "0"
     if score >= 1:
         return "1"
@@ -654,7 +791,7 @@ def _say(text: Text) -> None:
 
 def print_report(report: Report, dry_run: bool) -> None:
     if not report.questions:
-        _say(Text("No question of the exam has a grader."))
+        _say(Text("No question of the exam has a grader or an answer key."))
     for q in report.questions:
         _say(Text.assemble((q.slug, "bold"), (" (dry run)", "dim") if dry_run else ""))
         if q.aborted:

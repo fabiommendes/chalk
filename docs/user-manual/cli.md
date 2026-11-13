@@ -337,7 +337,7 @@ $ chalk codehood [OPTIONS] COMMAND [ARGS]...
 **Commands**:
 
 * `grades`: Write the grade of each quiz, in percent,...
-* `autograde`: Grade the code answers of a codehood exam...
+* `autograde`: Grade the code and objective answers of a...
 
 ### `chalk codehood grades`
 
@@ -358,9 +358,11 @@ $ chalk codehood grades [OPTIONS]
 
 ### `chalk codehood autograde`
 
-Grade the code answers of a codehood exam and write the grades back.
+Grade the code and objective answers of a codehood exam and write the grades back.
 
-Reads codehood.toml, questions/ and graders/ of the current directory. The
+Reads codehood.toml, questions/ and graders/ of the current directory. Code
+is graded by its grader; multiple choice and the like by the mdq key,
+when the file is the version published on the server. The
 key of the grading bot comes from CODEHOOD_BOT_KEY or --key-file and is
 never passed to the graded code. Answers with human feedback are skipped.
 

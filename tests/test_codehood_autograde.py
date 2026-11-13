@@ -18,6 +18,7 @@ The command is `chalk codehood autograde` in the current directory, which
 holds `codehood.toml` ([course] discipline/instructor/edition, [server] url).
 """
 
+import hashlib
 import re
 import shutil
 from fractions import Fraction
@@ -575,3 +576,186 @@ class TestCheckAndTry:
         assert r_good.exit_code == 0, r_good.output
         assert "fat5" in r_wrong.output
         assert "fat5" not in r_good.output
+
+
+#
+# Objective questions: graded with the answer key of the mdq file
+#
+MULTIPLE_CHOICE = """\
+---
+id: mc
+---
+
+Qual é a capital da França?
+
+* [*] [paris] Paris
+* [ ] [roma] Roma
+  > Roma é a capital da Itália.
+* [ ] [lima] Lima
+"""
+
+MULTIPLE_SELECTION = """\
+---
+id: ms
+---
+
+Quais são linguagens funcionais?
+
+* [x] [elm] Elm
+* [x] [haskell] Haskell
+  > Haskell é funcional.
+* [ ] [c] C
+  > C é imperativa.
+"""
+
+TRUE_FALSE = """\
+---
+id: tf
+---
+
+Julgue as afirmativas.
+
+* [V] [if-sem-else] Um `if` sem `else` não compila.
+* [F] [reatribui] Um `let` pode ser reatribuído.
+  > Não existe reatribuição em Elm.
+"""
+
+PENDING = "PENDING_GRADE"
+
+
+def add_objective(
+    course: Path, server: FakeCodehood, slug: str, text: str, *, published: str | None = None
+) -> Path:
+    """
+    questions/<slug>.md, published on the server with the md5 of `published`
+    (default: the text of the file).
+    """
+    path = write(course / "questions" / f"{slug}.md", text.replace("id: mc", f"id: {slug}"))
+    raw = (published or path.read_text()).encode()
+    server.publish(slug, f"md5:{hashlib.md5(raw).hexdigest()}")
+    return path
+
+
+def objective_exam(course: Path, server: FakeCodehood, slug: str, text: str) -> None:
+    text = re.sub(r"^id: .*$", f"id: {slug}", text, count=1, flags=re.MULTILINE)
+    add_objective(course, server, slug, text)
+    server.add_exam("p1", [slug])
+
+
+class TestObjective:
+    def test_multiple_choice(self, course, server) -> None:
+        objective_exam(course, server, "mc", MULTIPLE_CHOICE)
+        right, wrong = (
+            server.add_attempt(who, "p1", [("mc", answer, PENDING)])[0]
+            for who, answer in (("ana", "paris"), ("bia", "roma"))
+        )
+
+        result = autograde(server, "p1")
+
+        assert result.exit_code == 0, result.output
+        assert server.fraction(right) == 1
+        assert server.fraction(wrong) == Fraction(-1, 2)  # mdq penalizes a wrong choice
+        assert server.written(wrong)["feedback"] == "Roma é a capital da Itália."
+        assert server.written(wrong)["bot"] == "runner"
+        assert all(body["ref"] == "chalk" for _, body in server.puts)
+        assert "graded 2" in result.output
+
+    def test_multiple_selection(self, course, server) -> None:
+        objective_exam(course, server, "ms", MULTIPLE_SELECTION)
+        full, partial = (
+            server.add_attempt(who, "p1", [("ms", answer, PENDING)])[0]
+            for who, answer in (("ana", ["elm", "haskell"]), ("bia", ["elm", "c"]))
+        )
+
+        result = autograde(server, "p1")
+
+        assert result.exit_code == 0, result.output
+        assert server.fraction(full) == 1
+        assert server.fraction(partial) < 1
+        assert "C é imperativa." in server.written(partial)["feedback"]
+
+    def test_true_false_with_the_payload_of_codehood(self, course, server) -> None:
+        objective_exam(course, server, "tf", TRUE_FALSE)
+        right, wrong = (
+            server.add_attempt(who, "p1", [("tf", answer, PENDING)])[0]
+            for who, answer in (
+                ("ana", {"if-sem-else": True, "reatribui": False}),
+                ("bia", {"if-sem-else": False, "reatribui": True}),
+            )
+        )
+
+        result = autograde(server, "p1")
+
+        assert result.exit_code == 0, result.output
+        assert server.fraction(right) == 1
+        assert server.fraction(wrong) <= 0
+        assert -1 <= server.fraction(wrong) <= 1
+        assert "Não existe reatribuição em Elm." in server.written(wrong)["feedback"]
+
+    def test_by_question(self, course, server) -> None:
+        objective_exam(course, server, "mc", MULTIPLE_CHOICE)
+        (sid,) = server.add_attempt("ana", "p1", [("mc", "paris", PENDING)])
+        result = autograde(server, "p1/mc")
+        assert result.exit_code == 0, result.output
+        assert server.fraction(sid) == 1
+
+    def test_invalid_answer_is_an_error_and_writes_nothing(self, course, server) -> None:
+        objective_exam(course, server, "mc", MULTIPLE_CHOICE)
+        bad, good = (
+            server.add_attempt(who, "p1", [("mc", answer, PENDING)])[0]
+            for who, answer in (("ana", "madri"), ("bia", "paris"))
+        )
+
+        result = autograde(server, "p1")
+
+        assert result.exit_code == 1
+        assert [sid for sid, _ in server.puts] == [good]
+        assert bad not in server.feedback
+        assert "errors 1" in result.output and bad in result.output
+
+    def test_local_file_different_from_the_published_is_refused(self, course, server) -> None:
+        path = add_objective(course, server, "mc", MULTIPLE_CHOICE, published="outra versão")
+        server.add_exam("p1", ["mc"])
+        server.add_attempt("ana", "p1", [("mc", "paris", PENDING)])
+
+        result = autograde(server, "p1")
+
+        assert result.exit_code == 1
+        assert server.puts == []
+        assert "not the version on the server" in result.output
+        assert path.name in result.output
+
+    def test_dry_run_writes_nothing(self, course, server) -> None:
+        objective_exam(course, server, "mc", MULTIPLE_CHOICE)
+        server.add_attempt("ana", "p1", [("mc", "paris", PENDING)])
+        server.add_attempt("bia", "p1", [("mc", "roma", PENDING)])
+
+        result = autograde(server, "p1", "--dry-run")
+
+        assert result.exit_code == 0, result.output
+        assert server.puts == []
+        assert "graded 2" in result.output
+
+    def test_human_feedback_and_older_submissions_are_skipped(self, course, server) -> None:
+        objective_exam(course, server, "mc", MULTIPLE_CHOICE)
+        old, new = server.add_attempt(
+            "ana", "p1", [("mc", "roma", PENDING), ("mc", "paris", PENDING)]
+        )
+        (human,) = server.add_attempt("bia", "p1", [("mc", "roma", PENDING)])
+        server.add_feedback(human, "prof", "1/2", grader="prof")
+
+        result = autograde(server, "p1")
+
+        assert result.exit_code == 0, result.output
+        assert [sid for sid, _ in server.puts] == [new]
+        assert "skipped (human feedback) 1" in result.output
+
+    def test_essay_without_grader_is_left_out(self, course, server) -> None:
+        write(course / "questions" / "ensaio.md", "---\nid: ensaio\n---\n\nTexto.\n\n[essay]\n")
+        server.add_exam("p1", ["ensaio"])
+        server.add_attempt("ana", "p1", [("ensaio", "texto", PENDING)])
+
+        result = autograde(server, "p1")
+
+        assert result.exit_code == 0, result.output
+        assert server.puts == []

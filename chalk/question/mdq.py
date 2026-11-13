@@ -34,7 +34,13 @@ if TYPE_CHECKING:
     from ..codehood_autograde import FoundGrader
     from ..core.quiz import Quiz
 
-__all__ = ["MdqQuestion", "MDQ_SUFFIXES", "load_mdq_document", "mdq_question_id"]
+__all__ = [
+    "MdqQuestion",
+    "MDQ_SUFFIXES",
+    "check_references",
+    "load_mdq_document",
+    "mdq_question_id",
+]
 
 #: Suffixes of question files, in order of precedence.
 MDQ_SUFFIXES = (".mdq.md", ".md", ".mdq", ".yaml", ".yml", ".json")
@@ -157,40 +163,9 @@ class MdqQuestion(BaseQuestion[models.GenericQuestion, AnyAnswer]):
     def _check_references(self, response: Any, /) -> None:
         """
         Raise ValueError(Issue) with code "unknown-choice" when the response
-        refers to a choice, statement or blank the document does not have.
-
-        multiple-choice: the id; multiple-selection: each id; true-false: the
-        keys of the mapping (statement ids, in document.choices); fill-in: the
-        keys of the mapping (document.blanks[*].id). Other types and responses
-        of the wrong shape pass (mdq rejects the shape later).
+        refers to something the document does not have (see check_references).
         """
-        document = self._document
-        if self.type in ("multiple-choice", "multiple-selection", "true-false"):
-            ids = [choice.id for choice in getattr(document, "choices", None) or []]
-            what = "one of the choices"
-        elif self.type == "fill-in":
-            ids = [blank.id for blank in getattr(document, "blanks", None) or []]
-            what = "a blank of the question"
-        else:
-            return
-
-        if self.type == "multiple-choice":
-            values = [response] if isinstance(response, str) else []
-        elif self.type == "multiple-selection":
-            values = (
-                [v for v in response if isinstance(v, str)]
-                if isinstance(response, Sequence) and not isinstance(response, str)
-                else []
-            )
-        else:
-            values = list(response) if isinstance(response, Mapping) else []
-
-        for value in values:
-            if value not in ids:
-                raise fail(
-                    "unknown-choice",
-                    f"Answer {value!r} is not {what}: {', '.join(map(str, ids))}",
-                )
+        check_references(self._document, response)
 
     def _choice_id(self, answer: Any) -> Any:
         """
@@ -359,6 +334,44 @@ def load_mdq_document(path: Path, id: QuestionId, *, check_id: bool = True) -> m
     if document.id != id:
         document = document.model_copy(update={"id": id})
     return document
+
+
+def check_references(document: mdqm.Question, response: Any, /) -> None:
+    """
+    Raise ValueError(Issue) with code "unknown-choice" when the response
+    refers to a choice, statement or blank the document does not have.
+
+    multiple-choice: the id; multiple-selection: each id; true-false: the
+    keys of the mapping (statement ids, in document.choices); fill-in: the
+    keys of the mapping (document.blanks[*].id). Other types and responses
+    of the wrong shape pass (mdq rejects the shape later).
+    """
+    if document.type in ("multiple-choice", "multiple-selection", "true-false"):
+        ids = [choice.id for choice in getattr(document, "choices", None) or []]
+        what = "one of the choices"
+    elif document.type == "fill-in":
+        ids = [blank.id for blank in getattr(document, "blanks", None) or []]
+        what = "a blank of the question"
+    else:
+        return
+
+    if document.type == "multiple-choice":
+        values = [response] if isinstance(response, str) else []
+    elif document.type == "multiple-selection":
+        values = (
+            [v for v in response if isinstance(v, str)]
+            if isinstance(response, Sequence) and not isinstance(response, str)
+            else []
+        )
+    else:
+        values = list(response) if isinstance(response, Mapping) else []
+
+    for value in values:
+        if value not in ids:
+            raise fail(
+                "unknown-choice",
+                f"Answer {value!r} is not {what}: {', '.join(map(str, ids))}",
+            )
 
 
 def _format_diagnostic(diagnostic: mdq.Diagnostic) -> str:

@@ -86,9 +86,11 @@ def autograde(
     ] = None,
 ) -> None:
     """
-    Grade the code answers of a codehood exam and write the grades back.
+    Grade the code and objective answers of a codehood exam and write the grades back.
 
-    Reads codehood.toml, questions/ and graders/ of the current directory. The
+    Reads codehood.toml, questions/ and graders/ of the current directory. Code
+    is graded by its grader; multiple choice and the like by the mdq key,
+    when the file is the version published on the server. The
     key of the grading bot comes from CODEHOOD_BOT_KEY or --key-file and is
     never passed to the graded code. Answers with human feedback are skipped.
     """

@@ -7,6 +7,7 @@ Routes, all under `/api/course/<discipline>/<course>` and all needing
 `Authorization: Bearer <token>`:
 
 - `GET  exam/<slug>`
+- `GET  question/<slug>`                                (`version` only, see `publish`)
 - `GET  response?exam=&acceptingSubmissions=&practice=`  (submissions embedded)
 - `GET  submission?exam=&question=&statuses=...`        (`statuses` repeated)
 - `GET  submission/<publicId>/feedback`
@@ -44,6 +45,8 @@ class FakeCodehood:
     responses: dict[str, dict[str, Any]] = field(default_factory=dict)
     submissions: list[dict[str, Any]] = field(default_factory=list)
     feedback: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    #: Published questions: slug to version (`md5:<hex>`).
+    versions: dict[str, str] = field(default_factory=dict)
     #: Mimics production, where GET feedback ignores the submission and lists all feedback.
     leaky_feedback: bool = False
     #: Every request received: (method, path without query, body or None).
@@ -54,6 +57,9 @@ class FakeCodehood:
     # ------------------------------------------------------------- building
     def add_exam(self, slug: str, questions: list[str]) -> None:
         self.exams[slug] = questions
+
+    def publish(self, slug: str, version: str) -> None:
+        self.versions[slug] = version
 
     def add_attempt(
         self,
@@ -213,6 +219,11 @@ class FakeCodehood:
                 return send(404, {"code": "not-found", "message": "exam"})
             questions = [{"slug": q, "version": None} for q in self.exams[m[1]]]
             return send(200, {"slug": m[1], "title": m[1], "questions": questions})
+
+        if method == "GET" and (m := re.fullmatch(r"question/([^/]+)", rest)):
+            if m[1] not in self.versions:
+                return send(404, {"code": "not-found", "message": "question"})
+            return send(200, {"slug": m[1], "status": "PUBLISHED", "version": self.versions[m[1]]})
 
         if method == "GET" and rest == "response":
             out = []

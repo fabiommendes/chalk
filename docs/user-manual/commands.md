@@ -20,7 +20,7 @@ chalk
 │   └── create   create a quiz
 ├── codehood
 │   ├── grades   write quiz grades to codehood's grades.csv
-│   └── autograde grade the code answers of a codehood exam
+│   └── autograde grade the code and objective answers of a codehood exam
 └── contrib      run a contrib module (GitHub Classroom, converters...)
 ```
 
@@ -54,10 +54,11 @@ chalk show p1/q3 --answers -o q3.md # every answer to q3 in one file
 
 ## Grading codehood answers
 
-`chalk codehood autograde` grades the code answers of a
-[codehood](https://github.com/fabiommendes/codehood) exam with the autograder
-profiles and writes the grades back through the REST API. Run it at the root
-of the course.
+`chalk codehood autograde` grades the answers of a
+[codehood](https://github.com/fabiommendes/codehood) exam and writes the
+grades back through the REST API: the code answers with the autograder
+profiles, and the objective ones with the answer key of the mdq question. Run
+it at the root of the course.
 
 ```text
 chalk codehood autograde EXAM[/QUESTION] [-n/--dry-run]
@@ -113,6 +114,17 @@ course/
   pending, listed as "manual" in the report.
 - An error of the infrastructure (sandbox, profile, prepare) writes nothing
   and appears in the report; the exit code is 1.
+- A question of the exam without a grader is objective when
+  `questions/` has a Markdown file with its `id` and mdq can grade it
+  (multiple choice, multiple selection, true or false, numeric, ordering,
+  matching...). Essays are left alone. The answer saved on the server is
+  already an mdq response and is graded with the key of the file; the score
+  is the one of mdq, so it can be negative, and the feedback is the one of the
+  choices the student got wrong. An invalid answer (a choice the question does
+  not have) is written nowhere and counts as an error.
+- The file must be the version on the server: its md5 is compared with the
+  `version` of the question, and a question that differs is not graded and
+  appears in the report. Push the question first.
 - `-n/--dry-run` writes nothing and prints the distribution of the scores.
 - `--check` grades the reference solution of a grader folder, and `--try`
   grades a local file. Neither needs a server or a key.
