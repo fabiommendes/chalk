@@ -17,7 +17,7 @@ Usage:
 PATH is a Prolog file of tests or a directory searched for `*.pl` files. The
 report has a `testcase` for each test of the PATHs, with `classname` set to
 the plunit unit. --memory is the memory of the swipl process of each test;
-its stacks get 64 MiB less, so a test that goes past them fails with a
+its stacks get 5/8 of it, so a test that goes past them fails with a
 resource error, on its own, before the memory of the run is exhausted.
 """
 
@@ -35,8 +35,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PROLOG = HERE / "prolog_plunit.pl"
 
-#: Memory of a swipl process besides its stacks, in MiB.
-STACK_MARGIN = 64
+#: Share of the memory of a swipl process its stacks get. Its memory goes
+#: up to about 1.37 times the stack limit (garbage collection, findall/3
+#: buffers), so the share leaves room for that and for swipl itself.
+STACK_SHARE = (5, 8)
+
+#: Smallest stack limit, in MiB.
+MIN_STACK = 16
 
 #: Longest incomplete line kept while looking for the verdict, in bytes.
 MAX_LINE = 64 * 1024
@@ -76,8 +81,14 @@ def find_files(paths: list[Path]) -> list[str]:
     return files
 
 
+def stack_limit(memory: int) -> int:
+    """The stack limit of a swipl process with the given memory, in MiB."""
+    share, whole = STACK_SHARE
+    return max(memory * share // whole, MIN_STACK)
+
+
 def swipl_command(swipl: str, *args: str, memory: int | None = None) -> list[str]:
-    limit = [f"--stack-limit={max(memory - STACK_MARGIN, 16)}m"] if memory else []
+    limit = [f"--stack-limit={stack_limit(memory)}m"] if memory else []
     return [swipl, *limit, "-q", "-f", "none", str(PROLOG), "--", *args]
 
 

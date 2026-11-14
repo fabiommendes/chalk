@@ -36,7 +36,8 @@ class TestScriptLimits:
         body = 'head -c 100000 /dev/zero > big\nwc -c < big > "$CHALK_RESULT"\n'
         grader = script_grader(tmp_path, body, limits={"file_size": "1KB"})
         graded = grader("s1", "x", keep_files=True)
-        assert graded.score <= 1000
+        # Rounded up to the 512-byte blocks of ulimit -f.
+        assert graded.score == 1024
 
     def test_address_space(self, tmp_path) -> None:
         body = (

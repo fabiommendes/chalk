@@ -46,10 +46,8 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
-from pydantic import ByteSize
-
+from . import cgroup, models
 from . import disqualification as dq
-from . import models
 from .graded import DEFAULT_TIMEOUT, Graded
 from .profiles import (
     PrepareError,
@@ -58,6 +56,7 @@ from .profiles import (
     install_trusted_files,
     read_report,
     read_stdio_report,
+    stdio_errors,
     stdio_keys,
 )
 from .repo import Repo
@@ -158,16 +157,23 @@ def with_limits(variables: Mapping[str, str], limits: models.Limits | None) -> d
     return out
 
 
-def step_limits(limits: models.Limits | None, variables: Mapping[str, str]) -> models.Limits:
+def step_memory(variables: Mapping[str, str]) -> int | None:
     """
-    The limits of a step, with the memory of the profile ({memory_mib})
-    when the limits do not set one: the memory of the cgroup of the run.
+    The memory of the cgroup of a step, in bytes, from its {memory_mib}
+    (see with_limits), for when the limits of the step do not set one.
+
+    Raises:
+        PrepareError: memory_mib is not a whole number of MiB.
     """
-    limits = limits or models.Limits()
-    memory = variables.get("memory_mib", "")
-    if limits.memory is None and memory.isdigit():
-        return limits.model_copy(update={"memory": ByteSize(int(memory) * MiB)})
-    return limits
+    value = variables.get("memory_mib")
+    if value is None:
+        return None
+    if not value.isdigit() or int(value) == 0:
+        raise PrepareError(
+            f"vars.memory_mib must be a whole number of MiB, such as 512, not {value!r}; "
+            "limits.memory takes units"
+        )
+    return int(value) * MiB
 
 
 def render(text: str, variables: Mapping[str, str]) -> str:
@@ -237,6 +243,7 @@ class ProfileGrader(ScriptGrader):
                 **self.spec.vars,
                 **self.conf.vars,
             }
+            step_memory(with_limits(variables, self.conf.limits))
             variables.update(self._probe(repo.root, variables))
             cache_dir = self._fill_cache(template, variables, repo.root)
             variables["cache"] = str(cache_dir)
@@ -308,6 +315,9 @@ class ProfileGrader(ScriptGrader):
         capture_output: bool,
         sandbox: Sandbox | None,
     ) -> Result:
+        # Set up the cgroups before any process of the run starts, such as
+        # the services: the setup gives up when the grader is not alone.
+        cgroup.controller()
         overlays = install_trusted_files(repo.root, self._template(), self._trusted())
         for pattern in self.spec.hide:
             check_relative(pattern)
@@ -336,7 +346,6 @@ class ProfileGrader(ScriptGrader):
             )
             limits = self.conf.build.limits or build.limits or self.conf.limits
             build_variables = with_limits(variables, limits)
-            limits = step_limits(limits, build_variables)
             result = ScriptRunner(
                 None,
                 repo,
@@ -344,6 +353,7 @@ class ProfileGrader(ScriptGrader):
                 extra_env=self._env(build_variables),
                 timeout=self.conf.build.timeout or build.timeout or timeout,
                 limits=limits,
+                default_memory=step_memory(build_variables),
                 log_name="chalk.build",
                 expect_result=False,
                 **run,
@@ -358,7 +368,7 @@ class ProfileGrader(ScriptGrader):
         test = self.spec.test
         limits = test.limits or self.conf.limits
         variables = with_limits(variables, limits)
-        limits = step_limits(limits, variables)
+        run["default_memory"] = step_memory(variables)
         run["extra_env"] = self._env(variables)
         command = self._command(test.command, variables)
         services = None
@@ -486,12 +496,17 @@ class ProfileGrader(ScriptGrader):
         Tests in the report of the reference run.
         """
         keys: list[TestKey] = []
+        errors: list[str | None] = []
 
-        parse = stdio_keys if self.spec.report == "stdio" else junit_keys
+        stdio = self.spec.report == "stdio"
+        parse = stdio_keys if stdio else junit_keys
 
         def collect(path: Path, extra: Sequence[str]) -> Graded:
             if path.stat().st_size <= MAX_RESULT_SIZE:
-                keys.extend(parse(path.read_text(errors="replace")))
+                text = path.read_text(errors="replace")
+                keys.extend(parse(text))
+                if stdio:
+                    errors.extend(stdio_errors(text))
             for src in extra:
                 keys.extend(junit_keys(src))
             return Graded(Fraction(1))
@@ -518,6 +533,11 @@ class ProfileGrader(ScriptGrader):
             raise PrepareError(
                 f"the reference run of the {self.name} profile has no tests in its "
                 f"report{self._hint()}:\n{details}".rstrip()
+            )
+        if errors and all(errors):
+            raise PrepareError(
+                f"every case of the reference run of the {self.name} profile fails, "
+                f"such as: {errors[0]}"
             )
         return {key: key[1] if key[0] == "stdio" else "::".join(key) for key in dict.fromkeys(keys)}
 

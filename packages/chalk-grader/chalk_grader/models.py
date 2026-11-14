@@ -23,10 +23,12 @@ class Limits(BaseModel):
         ByteSize | None,
         Field(
             description=(
-                "Memory a run may take, files in its /tmp included. A run that goes past it "
-                "is killed and gets the memory-limit result. Profiles also turn it into "
-                "the limits of their runtime, such as the heap of Node, through the "
-                "{memory_mib} variable; without it, the profile's default applies."
+                "Memory a run may take, files in its /tmp included (memory.max of its "
+                "cgroup). A run that goes past it is killed and gets the memory-limit "
+                "result. Profiles also turn it into the limits of their runtime, such as "
+                "the heap of Node, through the {memory_mib} variable; without it, the "
+                "profile's default applies. Without cgroups, it is also the address space "
+                "of the run, unless address_space is set."
             ),
         ),
     ] = None
@@ -45,8 +47,8 @@ class Limits(BaseModel):
         Field(
             description=(
                 "Address space limit of the script and each process it starts (RLIMIT_AS). "
-                "Runtimes that reserve large virtual areas, such as Node and the JVM, need "
-                "a generous value."
+                "Rarely needed: runtimes such as Node, the JVM and torch reserve far more "
+                "address space than they use, and `memory` limits what they use."
             ),
         ),
     ] = None

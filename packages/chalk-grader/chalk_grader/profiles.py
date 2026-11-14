@@ -25,6 +25,7 @@ __all__ = [
     "read_report",
     "read_stdio_report",
     "score_report",
+    "stdio_errors",
     "stdio_keys",
 ]
 
@@ -188,6 +189,17 @@ def stdio_keys(src: str) -> list[TestKey]:
     try:
         return [("stdio", str(c["name"])) for c in json.loads(src)["cases"]]
     except (ValueError, KeyError, TypeError):
+        return []
+
+
+def stdio_errors(src: str) -> list[str | None]:
+    """
+    Why each case in a report of the stdio runner failed to run, or None
+    for the cases that ran.
+    """
+    try:
+        return [str(c["error"]) if c.get("error") else None for c in json.loads(src)["cases"]]
+    except (ValueError, KeyError, TypeError, AttributeError):
         return []
 
 

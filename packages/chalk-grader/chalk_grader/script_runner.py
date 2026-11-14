@@ -30,6 +30,7 @@ __all__ = [
     "LAUNCHER",
     "ChalkEnv",
     "Result",
+    "RunError",
     "RunKilled",
     "ScriptRunner",
 ]
@@ -60,12 +61,17 @@ DEFAULT_PROCESSES = 256
 #: Shell script that starts every run: it joins the cgroup of the run ($1),
 #: applies the address space ($2, KiB) and file size ($3, 512-byte blocks)
 #: limits and executes the rest of its arguments. It replaces preexec_fn,
-#: which may deadlock the child of a process with threads.
+#: which may deadlock the child of a process with threads. When it fails,
+#: it says why on the file descriptor $4, which it closes before the exec,
+#: so the code of the run cannot pass for the launcher.
 LAUNCHER = """\
-if [ -n "$1" ]; then echo $$ > "$1/cgroup.procs" || exit 125; fi
-if [ -n "$2" ]; then ulimit -v "$2" || exit 125; fi
-if [ -n "$3" ]; then ulimit -f "$3" || exit 125; fi
-shift 3
+fail() { eval 'echo "$1" >&'"$fd"; exit 125; }
+fd=$4
+if [ -n "$1" ]; then echo $$ 2>/dev/null > "$1/cgroup.procs" || fail "cannot join $1"; fi
+if [ -n "$2" ]; then ulimit -v "$2" 2>/dev/null || fail "cannot apply ulimit -v $2"; fi
+if [ -n "$3" ]; then ulimit -f "$3" 2>/dev/null || fail "cannot apply ulimit -f $3"; fi
+eval "exec $fd>&-"
+shift 4
 exec "$@"
 """
 
@@ -88,11 +94,18 @@ class Result:
         return self.return_code == 0
 
 
-class RunKilled(RuntimeError):
+class RunError(RuntimeError):
+    """
+    The run failed for a reason that is not the answer's fault, such as the
+    launcher not joining the cgroup of the run. The answer is not graded.
+    """
+
+
+class RunKilled(RunError):
     """
     The system killed a process of the run, for a reason that is not the
-    answer's fault, such as the memory of the machine running out. The run
-    may pass on another try.
+    answer's fault, such as the memory of the machine running out.
+    `ScriptRunner.run` tries such a run once more before it raises this.
     """
 
 
@@ -116,6 +129,7 @@ class ScriptRunner:
         on_output_line: Callable[[str], Any] | None = None,
         capture_output: bool = True,
         limits: models.Limits | None = None,
+        default_memory: int | None = None,
         sandbox: Sandbox | None = None,
         log_name: str = "chalk.stdout",
         expect_result: bool = True,
@@ -140,7 +154,6 @@ class ScriptRunner:
                 raise OSError(f"Script is not a file: {script_path}")
             command = self._get_shell_command(script_path)
 
-        self._master_pty_fd, self._slave_pty_fd = pty.openpty()
         self.capture_output = capture_output
 
         # The result file lives outside the working directory, where the
@@ -171,50 +184,84 @@ class ScriptRunner:
                 hidden=sandbox.hidden,
             )
 
+        self._args = args
+        self._env = env
+        self._limits = limits or models.Limits()
+        #: Memory of the cgroup when the limits do not set one, such as the
+        #: default of a profile. Unlike limits.memory, it never becomes
+        #: RLIMIT_AS.
+        self._default_memory = default_memory
         self._cgroup: Cgroup | None = None
-        if (cgroups := cgroup.controller()) is not None:
-            limits = limits or models.Limits()
-            memory = None if limits.memory is None else int(limits.memory)
+        self._launch()
+
+    def _launch(self) -> None:
+        """
+        Start the run, in a cgroup of its own when the grader has them.
+        """
+        self._master_pty_fd, self._slave_pty_fd = pty.openpty()
+        self._result_dir.mkdir(mode=0o700, exist_ok=True)
+        limits = self._limits
+        cgroups = cgroup.controller()
+        if cgroups is not None:
+            memory = limits.memory if limits.memory is not None else self._default_memory
             processes = DEFAULT_PROCESSES if limits.processes is None else limits.processes
-            self._cgroup = cgroups.create(memory=memory, processes=processes)
+            self._cgroup = cgroups.create(
+                memory=None if memory is None else int(memory), processes=processes
+            )
+        address_space = limits.address_space
+        if address_space is None and cgroups is None:
+            # Without a cgroup, the memory the configuration sets is the
+            # address space, as before cgroups.
+            address_space = limits.memory
+        self._failure, failure = os.pipe()
         try:
-            self.process = self._start(args, limits, repo.root, env, capture_output)
+            launcher = [
+                "/bin/sh",
+                "-c",
+                LAUNCHER,
+                "chalk-run",
+                str(self._cgroup.path) if self._cgroup else "",
+                _blocks(address_space, 1024),
+                _blocks(limits.file_size, 512),
+                str(failure),
+            ]
+            self.process = subprocess.Popen(
+                [*launcher, *self._args],
+                cwd=self._repo.root,
+                env=self._env,
+                stdout=self._slave_pty_fd if self.capture_output else None,
+                stderr=self._slave_pty_fd if self.capture_output else None,
+                stdin=subprocess.DEVNULL,
+                pass_fds=(failure,),
+                # Own process group, so a timeout kills the whole tree and
+                # not only the shell.
+                start_new_session=True,
+            )
         except BaseException:
+            os.close(self._failure)
+            self._failure = -1
             self._close_cgroup()
             raise
+        finally:
+            os.close(failure)
 
-    def _start(
-        self,
-        args: list[str],
-        limits: models.Limits | None,
-        cwd: Path,
-        env: dict[str, str],
-        capture_output: bool,
-    ) -> subprocess.Popen[bytes]:
-        address_space = limits and limits.address_space
-        file_size = limits and limits.file_size
-        launcher = [
-            "/bin/sh",
-            "-c",
-            LAUNCHER,
-            "chalk-run",
-            str(self._cgroup.path) if self._cgroup else "",
-            str(int(address_space) // 1024) if address_space else "",
-            str(int(file_size) // 512) if file_size else "",
-        ]
-        return subprocess.Popen(
-            [*launcher, *args],
-            cwd=cwd,
-            env=env,
-            stdout=self._slave_pty_fd if capture_output else None,
-            stderr=self._slave_pty_fd if capture_output else None,
-            stdin=subprocess.DEVNULL,
-            # Own process group, so a timeout kills the whole tree and not
-            # only the shell.
-            start_new_session=True,
-        )
+    def _launch_failure(self) -> str | None:
+        """
+        Why the launcher could not start the run, read once the run ended.
+        """
+        try:
+            os.set_blocking(self._failure, False)
+            data = os.read(self._failure, 4096)
+        except OSError:
+            data = b""
+        finally:
+            os.close(self._failure)
+            self._failure = -1
+        return data.decode(errors="replace").strip() or None
 
     def __del__(self) -> None:
+        if getattr(self, "_failure", -1) >= 0:
+            os.close(self._failure)
         self._kill_group()
         self._close_cgroup()
         shutil.rmtree(getattr(self, "_result_dir", ""), ignore_errors=True)
@@ -243,9 +290,29 @@ class ScriptRunner:
             pass
 
     def run(self) -> Result:
+        """
+        Run the script and read its result. A run that the system kills
+        (RunKilled) runs once more.
+
+        Raises:
+            RunError: the run failed twice for a reason that is not the
+                answer's fault, or the launcher could not start it.
+        """
         if self._result is not None:
             return self._result
+        try:
+            return self._run()
+        except RunKilled as e:
+            log.warning(f"{e}; trying once more")
+        self._launch()
+        try:
+            return self._run()
+        except RunKilled as e:
+            raise RunKilled(
+                f"{e}, twice: the grading machine may be short of memory. Not graded."
+            ) from None
 
+    def _run(self) -> Result:
         if self.capture_output:
             timeout, stdout = self._run_to_stdout()
         else:
@@ -255,6 +322,9 @@ class ScriptRunner:
         events = self._close_cgroup()
         self._repo.write_file(self._log_name, stdout)
         student = self._chalk_env.student_id
+        if (failure := self._launch_failure()) is not None:
+            shutil.rmtree(self._result_dir, ignore_errors=True)
+            raise RunError(f"cannot start the run of {student}: {failure}")
         if events is not None and events.pids_max:
             log.info(f"The run of {student} reached its process limit {events.pids_max} times")
         if events is not None and events.over_memory:
@@ -463,8 +533,13 @@ class ChalkEnv:
 
 def memory_feedback(events: Events) -> str:
     if events.limit is None:
-        return "The answer used more memory than it may."
+        return "The answer used too much memory."
     return f"The answer used more than {events.limit // 2**20} MiB of memory."
+
+
+def _blocks(size: int | None, block: int) -> str:
+    """A size as a number of blocks for ulimit, rounded up; "" for none."""
+    return "" if size is None else str(-(-int(size) // block))
 
 
 def remove_ansi_codes(src: str) -> str:

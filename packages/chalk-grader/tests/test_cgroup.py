@@ -5,20 +5,23 @@ gets when started as
     systemd-run --user --scope -p Delegate=yes .venv/bin/python -m pytest ...
 
 (not under `uv run`: uv would share the scope). Elsewhere they are skipped,
-except the ones about the events.
+except the ones that use a fake controller.
 """
 
 import os
+import shutil
 import time
 from fractions import Fraction
 from pathlib import Path
 
 import pytest
+from conftest import FakeController
 from test_script_limits import script_grader
 
 from chalk_grader import cgroup
 from chalk_grader import disqualification as dq
-from chalk_grader.cgroup import Events
+from chalk_grader.cgroup import Cgroup, Events
+from chalk_grader.script_runner import RunError, RunKilled, memory_feedback
 
 needs_cgroup = pytest.mark.skipif(
     cgroup.controller() is None, reason="needs a delegated cgroup (see the docstring)"
@@ -32,18 +35,128 @@ echo 1 > "$CHALK_RESULT"
 """
 
 
+MiB = 2**20
+
+
+PASS = 'echo 1 > "$CHALK_RESULT"\n'
+
+
 class TestEvents:
     def test_over_memory(self) -> None:
-        assert Events(oom=1, oom_kill=2).over_memory
-        assert not Events(oom=1, oom_kill=2).killed_from_outside
+        assert Events(oom=1, oom_kill=2, limit=MiB).over_memory
+        assert not Events(oom=1, oom_kill=2, limit=MiB).killed_from_outside
 
     def test_killed_by_the_system(self) -> None:
-        assert Events(oom_kill=1).killed_from_outside
-        assert not Events(oom_kill=1).over_memory
+        assert Events(oom_kill=1, limit=MiB).killed_from_outside
+        assert not Events(oom_kill=1, limit=MiB).over_memory
+
+    def test_without_a_limit_any_oom_kill_is_the_answer(self) -> None:
+        events = Events(oom_kill=1)
+        assert events.over_memory
+        assert not events.killed_from_outside
+        assert memory_feedback(events) == "The answer used too much memory."
 
     def test_quiet_run(self) -> None:
         assert not Events().over_memory
         assert not Events().killed_from_outside
+        assert not Events(limit=MiB).over_memory
+
+
+class TestBlame:
+    """What a run gets from the events of its cgroup."""
+
+    def test_killed_run_runs_again(self, tmp_path, fake_cgroups) -> None:
+        fake = fake_cgroups(Events(oom_kill=1))
+        graded = script_grader(tmp_path, PASS, limits={"memory": "100MiB"})("s1", "x")
+        assert graded.score == 1
+        assert fake.created == [(100 * MiB, 256), (100 * MiB, 256)]
+
+    def test_killed_twice_is_not_graded(self, tmp_path, fake_cgroups) -> None:
+        fake = fake_cgroups(Events(oom_kill=1), Events(oom_kill=1))
+        grader = script_grader(tmp_path, PASS, limits={"memory": "100MiB"})
+        with pytest.raises(RunKilled, match="twice"):
+            grader("s1", "x")
+        assert len(fake.created) == 2
+
+    def test_oom_kill_without_a_limit_is_the_answer(self, tmp_path, fake_cgroups) -> None:
+        fake = fake_cgroups(Events(oom_kill=1))
+        graded = script_grader(tmp_path, PASS)("s1", "x")
+        assert graded.score == dq.MemoryLimit()
+        assert graded.feedback == "The answer used too much memory."
+        assert fake.created == [(None, 256)]
+
+    def test_over_its_own_limit(self, tmp_path, fake_cgroups) -> None:
+        fake_cgroups(Events(oom=1, oom_kill=1))
+        graded = script_grader(tmp_path, PASS, limits={"memory": "100MiB"})("s1", "x")
+        assert graded.score == dq.MemoryLimit()
+        assert graded.feedback == "The answer used more than 100 MiB of memory."
+
+
+class TestLauncher:
+    def test_failure_is_not_the_answer(self, tmp_path, monkeypatch) -> None:
+        fake = FakeController(tmp_path / "cgroups")
+        create = fake.create
+
+        def broken(memory: int | None = None, processes: int | None = None) -> Cgroup:
+            group = create(memory, processes)
+            (group.path / "cgroup.procs").unlink()
+            (group.path / "cgroup.procs").mkdir()
+            return group
+
+        monkeypatch.setattr(fake, "create", broken)
+        monkeypatch.setattr(cgroup, "controller", lambda: fake)
+        with pytest.raises(RunError, match="cannot join"):
+            script_grader(tmp_path, PASS)("s1", "x")
+
+    def test_exit_125_of_the_answer_is_its_own(self, tmp_path, fake_cgroups) -> None:
+        fake_cgroups()
+        assert script_grader(tmp_path, "exit 125\n")("s1", "x").score == dq.Error()
+
+    def test_failure_descriptor_is_closed(self, tmp_path, fake_cgroups) -> None:
+        fake_cgroups()
+        body = 'ls /proc/self/fd | wc -l > "$CHALK_RESULT"\n'
+        # stdin, stdout, stderr and the directory ls reads.
+        assert script_grader(tmp_path, body)("s1", "x").score == 4
+
+    def test_sizes_round_up(self, tmp_path, no_cgroups) -> None:
+        body = '[ "$(ulimit -f)" = 1 ] && echo 1 > "$CHALK_RESULT" || echo 0 > "$CHALK_RESULT"\n'
+        assert script_grader(tmp_path, body, limits={"file_size": "100B"})("s1", "x").score == 1
+
+
+class TestAddressSpace:
+    CHECK = '[ "$(ulimit -v)" = {} ] && echo 1 > "$CHALK_RESULT" || echo 0 > "$CHALK_RESULT"\n'
+
+    def test_memory_is_the_address_space_without_cgroups(self, tmp_path, no_cgroups) -> None:
+        body = self.CHECK.format(200 * 1024)
+        graded = script_grader(tmp_path, body, limits={"memory": "200MiB"})("s1", "x")
+        assert graded.score == 1
+
+    def test_memory_is_not_the_address_space_with_cgroups(self, tmp_path, fake_cgroups) -> None:
+        fake_cgroups()
+        body = self.CHECK.format("unlimited")
+        graded = script_grader(tmp_path, body, limits={"memory": "200MiB"})("s1", "x")
+        assert graded.score == 1
+
+    def test_address_space_wins(self, tmp_path, no_cgroups) -> None:
+        body = self.CHECK.format(300 * 1024)
+        limits = {"memory": "200MiB", "address_space": "300MiB"}
+        assert script_grader(tmp_path, body, limits=limits)("s1", "x").score == 1
+
+
+@pytest.mark.skipif(not shutil.which("systemctl"), reason="needs systemctl")
+def test_no_reexec_without_the_systemd_of_the_user(monkeypatch) -> None:
+    def execv(*args: object) -> None:
+        raise AssertionError("must not run systemd-run")
+
+    monkeypatch.delenv(cgroup.REEXEC_ENV, raising=False)
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/nonexistent")
+    monkeypatch.setattr(cgroup, "current", lambda: Path("/sys/fs/cgroup/session-1.scope"))
+    monkeypatch.setattr(cgroup, "_delegated", lambda path: False)
+    monkeypatch.setattr(cgroup.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(cgroup.os, "execv", execv)
+    cgroup.reexec_delegated(["true"])
+    assert cgroup.REEXEC_ENV not in os.environ
 
 
 @needs_cgroup
@@ -97,5 +210,28 @@ class TestRunCgroup:
         assert not list(own.parent.glob("run-*"))
 
     def test_grader_survives(self, tmp_path) -> None:
-        script_grader(tmp_path, GREEDY, limits={"memory": "50MiB"})("s1", "x")
-        assert os.getpid() in map(int, (cgroup.current() / "cgroup.procs").read_text().split())  # type: ignore[operator]
+        graded = script_grader(tmp_path, GREEDY, limits={"memory": "50MiB"})("s1", "x")
+        assert graded.score == dq.MemoryLimit()
+        own = cgroup.current()
+        assert own is not None and own.name == cgroup.SUPERVISOR
+        assert os.getpid() in map(int, (own / "cgroup.procs").read_text().split())
+        # The next run works, in a cgroup of its own.
+        assert script_grader(tmp_path, PASS)("s2", "x").score == 1
+        assert not list(own.parent.glob("run-*"))
+
+    def test_memory_max_of_the_run(self, tmp_path) -> None:
+        body = 'cat "/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max" > "$CHALK_RESULT"\n'
+        graded = script_grader(tmp_path, body, limits={"memory": "100MiB"})("s1", "x")
+        assert graded.score == 100 * MiB
+
+    def test_memory_is_not_the_address_space(self, tmp_path) -> None:
+        body = TestAddressSpace.CHECK.format("unlimited")
+        assert script_grader(tmp_path, body, limits={"memory": "1GiB"})("s1", "x").score == 1
+
+    def test_kill_all(self, tmp_path) -> None:
+        found = cgroup.controller()
+        assert found is not None
+        run = found.create(memory=None, processes=None)
+        assert run.path.is_dir()
+        found.kill_all()
+        assert not run.path.exists()

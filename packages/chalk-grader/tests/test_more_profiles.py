@@ -4,15 +4,17 @@ The c-make, stdio, c-stdio and elm-test profiles, written only as data.
 
 import json
 import shutil
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
 import pytest
+from test_cgroup import needs_cgroup
 from test_sandbox import needs_bwrap
 
+from chalk_grader import cgroup, models
 from chalk_grader import disqualification as dq
-from chalk_grader import models
-from chalk_grader.profile_grader import ProfileGrader, resolve_profile, with_limits
+from chalk_grader.profile_grader import ProfileGrader, resolve_profile, step_memory, with_limits
 from chalk_grader.profiles import PrepareError, read_stdio_report
 from chalk_grader.runners.stdio import compare
 from chalk_grader.task import Task
@@ -143,11 +145,12 @@ for case in Path("tests").glob("*.in"):
         assert "tests/02: timed out after 1s" in (graded.feedback or "")
         assert "tests/03: exited with code 3" in (graded.feedback or "")
 
+    @needs_cgroup
     def test_memory_limit(self, stdio_template, tmp_path, sandbox) -> None:
         solution = make_tree(tmp_path / "sol", {"main.py": "print(sum(map(int, input().split())))"})
         program = (
             "a, b = map(int, input().split())\n"
-            "if a == 10:\n    x = bytearray(400 * 2**20)\n"
+            "if a == 10:\n    x = bytearray(b'y') * (400 * 2**20)\n"
             "print(a + b)\n"
         )
         root = make_tree(tmp_path / "s", {"main.py": program})
@@ -160,9 +163,22 @@ for case in Path("tests").glob("*.in"):
             return g("s1", root)
 
         graded = grade("200MiB")
-        assert graded.score == Fraction(2, 3)
-        assert "tests/02: exited with code 1" in (graded.feedback or "")
+        assert graded.score == dq.MemoryLimit()
+        assert graded.feedback == "The answer used more than 200 MiB of memory."
         assert grade("1GiB").score == 1
+
+    def test_default_memory_is_not_the_address_space(
+        self, stdio_template, tmp_path, sandbox, no_cgroups
+    ) -> None:
+        # 1 GiB of address space, twice the default memory, barely touched.
+        program = "x = bytearray(2**30)\nprint(sum(map(int, input().split())))"
+        solution = make_tree(tmp_path / "sol", {"main.py": program})
+        assert self.grade(stdio_template, solution, solution, sandbox).score == 1
+
+    def test_reference_that_fails_every_case(self, stdio_template, tmp_path, sandbox) -> None:
+        solution = make_tree(tmp_path / "sol", {"main.py": "raise SystemExit(2)"})
+        with pytest.raises(PrepareError, match="every case"):
+            grader("stdio", stdio_template, solution, sandbox=sandbox, vars=self.run).prepare()
 
 
 @pytest.mark.skipif(not shutil.which("cc"), reason="cc is needed")
@@ -343,11 +359,21 @@ def test_elm(elm_template, tmp_path, sandbox, tmp_path_factory) -> None:
     assert g("s3", broken).score == dq.BuildError()
 
     # Each element is a list of its own, so the memory runs out long before
-    # the time does: the heap of node (error) or, with a cgroup, often the
-    # memory of the run first (memory-limit).
-    greedy = elm_calc(sub="List.length (List.map List.singleton (List.range 1 100000000))")
-    graded = g("s4", make_tree(tmp_path / "g", greedy))
-    assert graded.score in (dq.Error(), dq.MemoryLimit())
+    # the time does.
+    greedy = make_tree(
+        tmp_path / "g",
+        elm_calc(sub="List.length (List.map List.singleton (List.range 1 100000000))"),
+    )
+    if cgroup.controller() is None:
+        # The heap of node stops it, and elm-test writes no report.
+        assert g("s4", greedy).score == dq.Error()
+    else:
+        # With the heap of node far above the memory of the run, the cgroup
+        # stops it first. With the heap at the memory of the run, as by
+        # default, either may come first.
+        env = {**g.spec.env, "NODE_OPTIONS": "--max-old-space-size=4096"}
+        large_heap = replace(g, profile=g.spec.model_copy(update={"env": env}))
+        assert large_heap("s4", greedy).score == dq.MemoryLimit()
 
 
 def test_limits_set_the_memory_of_the_step() -> None:
@@ -356,3 +382,51 @@ def test_limits_set_the_memory_of_the_step() -> None:
     assert with_limits(variables, models.Limits()) == variables
     limits = models.Limits(memory="1GiB")
     assert with_limits(variables, limits) == {"memory_mib": "1024", "jobs": "1"}
+
+
+def test_step_memory() -> None:
+    assert step_memory({"memory_mib": "512"}) == 512 * 2**20
+    assert step_memory({}) is None
+    for wrong in ("1G", "0", "", "1.5"):
+        with pytest.raises(PrepareError, match="whole number of MiB"):
+            step_memory({"memory_mib": wrong})
+
+
+class TestMemoryOfTheSteps:
+    """The memory.max of the cgroup of each step."""
+
+    run = {"run": "python3 main.py"}
+
+    def test_profile_default(self, stdio_template, tmp_path, fake_cgroups) -> None:
+        fake = fake_cgroups()
+        solution = make_tree(tmp_path / "sol", {"main.py": "print(sum(map(int, input().split())))"})
+        g = grader("stdio", stdio_template, solution, sandbox="none", vars=self.run)
+        assert g("s1", solution).score == 1
+        assert fake.created and {m for m, _ in fake.created} == {512 * 2**20}
+
+    def test_vars(self, stdio_template, tmp_path, fake_cgroups) -> None:
+        fake = fake_cgroups()
+        solution = make_tree(tmp_path / "sol", {"main.py": "print(sum(map(int, input().split())))"})
+        variables = {**self.run, "memory_mib": "300"}
+        g = grader("stdio", stdio_template, solution, sandbox="none", vars=variables)
+        assert g("s1", solution).score == 1
+        assert {m for m, _ in fake.created} == {300 * 2**20}
+
+    @pytest.mark.skipif(not shutil.which("cc"), reason="cc is needed")
+    def test_limits_of_build_and_test(self, stdio_template, tmp_path, fake_cgroups) -> None:
+        fake = fake_cgroups()
+        c_sum = '#include <stdio.h>\nint main(void) { int a, b; scanf("%d %d", &a, &b); '
+        c_sum += 'printf("%d\\n", a + b); }\n'
+        solution = make_tree(tmp_path / "sol", {"main.c": c_sum})
+        limits = models.Limits(memory="200MiB", processes=10)
+        g = grader("c-stdio", stdio_template, solution, sandbox="none", limits=limits)
+        assert g("s1", solution).score == 1
+        # Reference and student, build and test.
+        assert fake.created == [(200 * 2**20, 10)] * 4
+
+    def test_invalid_memory_mib(self, stdio_template, tmp_path) -> None:
+        solution = make_tree(tmp_path / "sol", {"main.py": "print(0)"})
+        variables = {**self.run, "memory_mib": "1G"}
+        g = grader("stdio", stdio_template, solution, sandbox="none", vars=variables)
+        with pytest.raises(PrepareError, match="whole number of MiB"):
+            g.prepare()

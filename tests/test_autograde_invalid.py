@@ -55,6 +55,25 @@ class TestAutogradeInvalid:
         grades = grades_text(classroom)
         assert "0001" in grades and "0002" in grades
 
+    def test_run_killed_does_not_stop_next_student(self, classroom: Path, monkeypatch) -> None:
+        from chalk_grader.graded import Graded
+        from chalk_grader.script_runner import RunKilled
+
+        def grader(student: str, answer: object, **kwargs: object) -> Graded:
+            if student == "0001":
+                raise RunKilled("the system killed a process of the run of 0001, twice")
+            return Graded(Decimal(1))
+
+        question = Classroom.load().get_quiz("p1").get_question("q1")
+        monkeypatch.setattr(type(question), "get_grader", lambda self: grader)
+        write_submissions(classroom, {"0001": "df", "0002": "df"})
+        result = CliRunner().invoke(app, ["autograde", "p1/q1"])
+        assert result.exit_code == 1
+        assert "not graded: the system killed" in result.output
+        grades = grades_text(classroom)
+        assert "0002" in grades
+        assert "0001" not in grades
+
 
 class TestErrorMessage:
     def test_issue(self) -> None:

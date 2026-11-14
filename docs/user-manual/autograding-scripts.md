@@ -165,7 +165,7 @@ questions:
       limits:
         memory: 1GB        # memory of each run (see below)
         processes: 256     # processes and threads of each run (default 256)
-        address_space: 2GB # address space of each process (RLIMIT_AS)
+        address_space: 2GB # address space of each process (RLIMIT_AS), rarely needed
         file_size: 50MB    # largest file a process can write
         answer_size: 1MB   # larger text answers are rejected (default 1 MiB)
 ```
@@ -176,15 +176,22 @@ killed, whole, and the answer gets the `memory-limit` result. A run that
 reaches `processes` cannot start more, and goes on. Files the run writes to
 `/tmp` count as memory. Nothing a run does reaches the other runs or chalk.
 
-Profiles have a default `memory`, and also turn it into a limit their
+When a process of a run is killed by the system, for the memory of the
+whole machine, while the run was within its own `memory`, the answer is not
+to blame: chalk runs it once more, and if that happens again, leaves it
+ungraded with a message saying so. A run without a `memory` of its own
+(the `script` profile without `limits.memory`) has no such excuse: any
+process of it the system kills for memory gives `memory-limit`.
+
+Profiles have a default `memory`, and some also turn it into a limit their
 runtime understands, so that a test that takes too much fails on its own:
 
 | Profile | Default | Limit of the runtime |
 |---|---|---|
-| `python-pytest` | 1 GiB | address space of pytest and the code it runs |
-| `stdio`, `c-stdio` | 512 MiB | address space of the program |
+| `python-pytest` | 1 GiB | none |
+| `stdio`, `c-stdio` | 512 MiB | none |
 | `elm-test` | 512 MiB | heap of node |
-| `prolog-plunit` | 512 MiB | stacks of each test, 64 MiB less |
+| `prolog-plunit` | 512 MiB | stacks of each test, 5/8 of the memory |
 | `c-make` | 1 GiB | none: AddressSanitizer reserves terabytes |
 | `rust-cargo` | 2 GiB | none; the budget includes the build |
 
@@ -195,12 +202,20 @@ profile of your own reads the limit as `{memory_mib}`, in MiB.
 The cgroups need a cgroup v2 delegated to chalk. `chalk autograde` and
 `chalk codehood autograde` run themselves again with
 `systemd-run --user --scope -p Delegate=yes`, which any Linux with systemd
-has. Without it (no systemd, a container without delegation), chalk warns
-once, and the limits of the runtimes above are all there is.
+has, as long as the systemd of the user is running: over ssh, enable
+lingering (`loginctl enable-linger`). Without it (no systemd, cron, a
+container without delegation), chalk warns once, and the limits of the
+runtimes above are all there is. Then a `memory` set in `limits` (not the
+default of a profile) also becomes the `address_space` of the run, as in
+chalk-grader 0.2.0, where `memory` was the address space.
 
 `address_space` limits virtual memory, not resident memory, of the script
-and every process it starts. Node, the JVM and Go reserve large virtual
-areas at startup, so give them a generous value or leave it unset.
+and every process it starts. Few questions need it, and no profile sets it:
+many runtimes reserve far more address space than they use. Measured, Node
+fails to start below about 1.4 GiB, the JVM does not start with 512 MiB,
+`import torch` (the CUDA build from PyPI) reserves 3.3 GiB with 760 MiB of
+resident memory, and pandas with 16 threads fails to start them. The
+cgroup limits what these programs really use.
 
 The environment of the script only has `PATH`, `HOME`, the locale variables
 and a few others. Add more with `autograder.pass_env`:
@@ -391,7 +406,7 @@ questions:
       build:
         timeout: 180           # build step, default 120
         limits:
-          address_space: 4GB
+          memory: 3GB          # build step, default 2 GiB
       on_build_error: manual   # build-error (default) | zero | manual
 ```
 

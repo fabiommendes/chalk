@@ -97,8 +97,12 @@ class TestScores:
         assert "fat5" in graded.feedback
         assert time.monotonic() - start < 30
 
-    def test_memory_limit_fails_only_that_test(self, template, sandbox) -> None:
-        graded = prolog(template, GREEDY, sandbox, vars={"memory_mib": "64"})
+    @pytest.mark.parametrize("memory", ["64", "512"])
+    def test_memory_limit_fails_only_that_test(self, template, sandbox, memory) -> None:
+        # 512 is the default of the profile.
+        graded = prolog(
+            template, GREEDY, sandbox, vars={"memory_mib": memory, "test_timeout": "30"}
+        )
         assert graded.score == Fraction(1, 2)
         assert "fat5" in graded.feedback
 

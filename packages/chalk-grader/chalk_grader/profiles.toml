@@ -9,10 +9,13 @@
 #
 # Limits. {jobs} is how many threads or processes a profile runs at once:
 # 1 by default, since a grader may grade one answer per core. {memory_mib}
-# is the memory of a run, from `limits.memory` or the profile's default
-# `vars.memory_mib`. It is the memory limit of the cgroup of each run, when
-# the grader has cgroups (see cgroup.py), and each profile also turns it
-# into a limit its runtime understands, which is all there is without them.
+# is the memory of a run, in MiB, from `limits.memory` or the profile's
+# default `vars.memory_mib`. It is the memory limit of the cgroup of each
+# run, when the grader has cgroups (see cgroup.py). Some profiles also turn
+# it into a limit their runtime understands (the heap of Node, the stacks of
+# swipl), which is all there is without cgroups. None turns it into
+# `ulimit -v`: address space is not memory, and torch, Node, the JVM and
+# threaded libraries reserve far more of it than they use.
 
 [python-pytest]
 description = "Python project tested with pytest, dependencies from uv.lock"
@@ -37,15 +40,20 @@ env.CHALK_GUARD = "{guard}"
 env.CHALK_GUARD_TRUSTED = "{tests}"
 env.OMP_NUM_THREADS = "{jobs}"
 env.OPENBLAS_NUM_THREADS = "{jobs}"
+# Each thread of glibc's malloc may get an arena of its own, which reserves
+# up to 64 MiB of address space and keeps freed memory.
+env.MALLOC_ARENA_MAX = "2"
 unset = ["PYTHONHOME"]
 vars.guard = "on"               # off: code under test may run subprocesses and ctypes
 vars.jobs = "1"
-vars.memory_mib = "1024"        # address space of pytest and the code it runs
+# Memory of the run with a cgroup. Measured: up to 269 MiB for the tests of
+# a question with pandas, 382 MiB for its prepare step.
+vars.memory_mib = "1024"
 # Python installations of uv, hidden in the home directory.
 probe.python = "uv python dir"
 prepare.commands = ["uv sync --frozen --no-install-project"]
 test.command = """\
-ulimit -v $(({memory_mib} * 1024)) && {cache}/venv/bin/python -m pytest --rootdir {workdir} -p no:cacheprovider -p pytest_guard \
+{cache}/venv/bin/python -m pytest --rootdir {workdir} -p no:cacheprovider -p pytest_guard \
 --junit-xml "$CHALK_RESULT" {tests}"""
 
 [python-pytest.suspicious."**/*.py"]
@@ -136,11 +144,11 @@ hide = ["**/*.out"]
 vars.run = "./main"
 vars.compare = "lines"          # exact | lines | tokens
 vars.test_timeout = "5"         # seconds per case
-# Address space of the program (and the runner). A program that reserves
-# large virtual areas, such as Node or the JVM, needs a larger value.
+# Memory of the run with a cgroup: the program and the runner. Measured:
+# 16 MiB for a C program, 48 MiB for a Python one.
 vars.memory_mib = "512"
+env.MALLOC_ARENA_MAX = "2"
 test.command = """\
-ulimit -v $(({memory_mib} * 1024)) && \
 {python} -I {runners}/stdio.py --report "$CHALK_RESULT" --timeout {test_timeout} \
 --command {run} {tests}"""
 
@@ -198,7 +206,7 @@ probe.swipl_home = '''swipl -g "current_prolog_flag(home, H), writeln(H)" -t hal
 # may do I/O, and halt/0 only ends its own test.
 vars.safe = "on"
 vars.test_timeout = "5"         # seconds per test
-vars.memory_mib = "512"         # each swipl process: its stacks get 64 MiB less
+vars.memory_mib = "512"         # each swipl process: its stacks get 5/8 of it
 build.command = """\
 {swipl} -q -f none {runners}/prolog_plunit.pl -- check {safe} "$CHALK_ANSWER\""""
 build.timeout = 60

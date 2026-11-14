@@ -2,7 +2,7 @@ import sys
 
 import typer
 
-from chalk_grader.cgroup import reexec_delegated
+from chalk_grader import cgroup
 
 from . import (
     autograde_cmd,
@@ -58,5 +58,8 @@ def main() -> None:
     words = [arg for arg in sys.argv[1:] if not arg.startswith("-")]
     grading = any(tuple(words[: len(c)]) == c for c in GRADING_COMMANDS)
     if grading and "--help" not in sys.argv:
-        reexec_delegated()
+        cgroup.reexec_delegated()
+        # Before the grader starts any process: the setup of the cgroups
+        # gives up when the delegated cgroup has other processes.
+        cgroup.controller()
     app()

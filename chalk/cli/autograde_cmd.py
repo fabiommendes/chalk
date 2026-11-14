@@ -12,6 +12,8 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.text import Text
 
+from chalk_grader.script_runner import RunError
+
 from ..core import Classroom, Question, Student
 from ..core.grader import DEFAULT_TIMEOUT, Grader, GraderKwargs, is_score
 from ..core.issue import error_message
@@ -363,6 +365,7 @@ def run_autograder(
     submissions = question.quiz.submissions
     has_changed = False
     invalid: list[StudentId] = []
+    failed: list[StudentId] = []
 
     for student in students:
         score = grades.get_score(student=student, question=question)
@@ -381,7 +384,14 @@ def run_autograder(
             rich.print(Text(f"invalid answer: {error_message(e)}", style="red"))
             invalid.append(student.id)
             continue
-        graded = grader(student.id, ans, **grader_kwargs)
+        try:
+            graded = grader(student.id, ans, **grader_kwargs)
+        except RunError as e:
+            # Not the answer's fault, such as the machine running out of
+            # memory: not graded, for a later run.
+            rich.print(Text(f"not graded: {e}", style="red"))
+            failed.append(student.id)
+            continue
         if graded is None:
             show("not graded.", style="yellow")
             continue
@@ -410,4 +420,14 @@ def run_autograder(
             Text(f"{len(invalid)} answer(s) not graded: {', '.join(invalid)}", style="red"),
             file=sys.stderr,
         )
+    if failed:
+        rich.print(
+            Text(
+                f"{len(failed)} answer(s) not graded because of the grading machine: "
+                f"{', '.join(failed)}; run again to grade them",
+                style="red",
+            ),
+            file=sys.stderr,
+        )
+    if invalid or failed:
         raise typer.Exit(1)

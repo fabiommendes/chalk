@@ -169,8 +169,8 @@ em vez de `preexec_fn`, e o comportamento de hoje.
    da execução, exposto como `{memory_mib}` por passo; cada perfil tem um
    padrão em `vars.memory_mib` e o converte para o próprio runtime:
    heap do Node no `elm-test` (orçamento − 128 MiB), `ulimit -v` no
-   `python-pytest` e no `stdio`, `--stack-limit` do swipl no
-   `prolog-plunit`. `vars.jobs` (padrão 1) limita o paralelismo:
+   `python-pytest` e no `stdio` (retirado na fase 3b), `--stack-limit` do
+   swipl no `prolog-plunit`. `vars.jobs` (padrão 1) limita o paralelismo:
    `--workers` do elm-test, `--jobs` e `--test-threads` do rust,
    `OMP_NUM_THREADS`/`OPENBLAS_NUM_THREADS` no pytest. Ficam sem limite
    de memória até a fase 3: `rust-cargo` (threads reservam espaço de
@@ -209,12 +209,96 @@ em vez de `preexec_fn`, e o comportamento de hoje.
      direto num escopo delegado:
      `systemd-run --user --scope -p Delegate=yes .venv/bin/python -m pytest`.
      Sob `uv run`, o uv dividiria o escopo.
+3b. **Feita (2026-11-14).** Correções depois da revisão de código e de
+   medições com questões reais. Decisões:
+   - **Sem `ulimit -v` nos perfis.** Com cgroup, ele só atrapalha (medidas
+     abaixo): o `python-pytest` e o `stdio` perderam o `ulimit -v
+     {memory_mib}`. Havia ainda um defeito: `limits.address_space` menor
+     que o `memory_mib` fazia o `ulimit -v` do perfil tentar subir o limite
+     *hard* que o lançador já tinha baixado, e toda execução dava `Error`.
+     `MALLOC_ARENA_MAX=2` nos dois perfis, para as arenas do glibc não
+     multiplicarem a memória por thread.
+   - **`limits.address_space`** só vale quando configurado. Sem cgroup,
+     `limits.memory` vira o `RLIMIT_AS` de reserva, como no 0.2.0, mas só o
+     `memory` da configuração do usuário, não o padrão `vars.memory_mib` do
+     perfil, que quebraria torch, Node e JVM em máquinas sem cgroup. A
+     distinção é de tipo: o padrão do perfil chega ao `ScriptRunner` como
+     `default_memory`, à parte de `limits`, e só serve de `memory.max`.
+     Vale em todos os perfis, não só no `script`: no 0.2.0 o
+     `limits.memory` era `RLIMIT_AS` em qualquer perfil, e uma
+     configuração que funcionava lá continua funcionando.
+   - **Culpa sem `memory.max`.** Uma execução sem limite de memória
+     próprio (perfil `script` sem `limits.memory`) só vê OOMs globais, e a
+     resposta que come a RAM é a escolha mais provável do OOM killer.
+     Então: sem `memory.max`, `oom_kill > 0` dá `dq.MemoryLimit()`, com
+     feedback sem número; `RunKilled` só quando havia `memory.max` e
+     `oom == 0`.
+   - **`RunKilled` tratado num ponto só**, em `ScriptRunner.run()`: a
+     execução (o passo, não a correção inteira) roda de novo uma vez; na
+     segunda, sai `RunKilled` com mensagem "twice: the grading machine may
+     be short of memory". O `chalk autograde` lista o aluno como não
+     corrigido e sai com 1 no fim, sem gravar nota; o
+     `chalk codehood autograde` já tratava `RuntimeError` como erro do
+     item. No `prepare`/`verify_reference` a questão ainda é abortada:
+     sem a execução da referência não há testes esperados.
+   - **Falha do lançador** (não entrou no cgroup, `ulimit` recusado) é
+     `RunError`, a base de `RunKilled`, e não `build-error` do aluno. O
+     lançador diz o motivo num descritor herdado que ele fecha antes do
+     `exec`, então o código do aluno não consegue se passar por ele (um
+     `exit 125` do aluno continua sendo dele). `ulimit -v`/`-f` arredondam
+     para cima: `file_size` abaixo de 512 bytes dava limite zero.
+   - **prolog-plunit:** pilha = 5/8 da memória (mínimo 16 MiB), no lugar
+     de memória − 64 MiB. O RSS do swipl chega a ~1,37× o
+     `--stack-limit` (GC, `findall/3`): com 512 MiB e pilha de 448 MiB, um
+     estouro de pilha virava `memory-limit` da execução inteira em vez de
+     falhar só aquele teste.
+   - **Setup do cgroup cedo:** `cgroup.controller()` é chamado no `main()`
+     do CLI logo depois da reexecução e no início dos passos do
+     `ProfileGrader`, antes dos serviços. Se a escrita em
+     `subtree_control` falha depois de o processo ir para `supervisor/`, ele
+     volta ao cgroup original e `supervisor/` é removido.
+   - **Reexecução sem barramento:** `reexec_delegated` só faz o `exec` do
+     `systemd-run` quando `systemctl --user show-environment` responde
+     (ssh sem lingering, cron e contêiner não têm o systemd do usuário).
+   - **Limpeza:** no `atexit` e em `SIGTERM`/`SIGHUP` o grader mata os
+     `run-*` que sobraram, para não manter o escopo vivo. `SIGKILL` não tem
+     tratamento.
+   - `vars.memory_mib` que não é um número inteiro de MiB ("1G") é erro de
+     configuração no `prepare`. No `stdio`, uma referência em que todos os
+     casos falham também.
+
+   Picos medidos (`memory.peak` do cgroup da execução) e os padrões:
+
+   | Perfil | Pico medido | Padrão |
+   |---|---|---|
+   | `prolog-plunit` | 21 MiB | 512 MiB |
+   | `python-pytest` | 269 MiB no teste, 382 MiB no prepare (pandas) | 1 GiB |
+   | `stdio` | 16 MiB (C), 48 MiB (Python) | 512 MiB |
+   | `c-make` | 135 MiB | 1 GiB |
+   | `rust-cargo` | 476 MiB no build (`-j1`), 91 MiB no teste | 2 GiB |
+
+   Espaço de endereçamento, que motivou tirar o `ulimit -v`: o torch do
+   PyPI (build CUDA) tem VmPeak de 3,3 GiB com RSS de ~760 MiB, e
+   `import torch` falha com 1 GiB; pandas com 16 threads dá "can't start
+   new thread" (arenas do glibc); o Node abaixo de ~1,4 GiB morre com
+   "Failed to reserve virtual memory for CodeRange"; a JVM não inicia com
+   512 MiB.
 4. `chalk-worker`: reexecução sob `Delegate=yes`, envio devolvido com
    `retry` na exceção de infraestrutura, relatório de `MemoryLimit`. O
    `--memory` do worker passa a ser o `limits.memory` do motor, e a
    admissão por `MemAvailable` continua.
 
 ## Em aberto
+
+- O `systemd-oomd` mata o cgroup inteiro sem passar pelo OOM killer do
+  kernel: não gera `oom_kill` em `memory.events`, então a culpa não é
+  atribuída nem há nova tentativa. A execução morta por ele parece um
+  `SIGKILL` comum.
+- Os comandos de `prepare` e os `services` ainda rodam sem cgroup próprio
+  (no `supervisor/`, junto com o grader). Uma nova tentativa depois de
+  `RunKilled` reaproveita os serviços já iniciados.
+- O CI não tem `cargo-nextest`, então os testes do `rust-cargo` não rodam
+  lá.
 
 - `systemd-oomd`: com `memory.max` por execução e sem swap, a pressão fica
   contida. Falta verificar se a unidade do worker precisa de
