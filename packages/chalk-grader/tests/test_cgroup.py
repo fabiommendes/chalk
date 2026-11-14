@@ -10,6 +10,7 @@ except the ones that use a fake controller.
 
 import os
 import shutil
+import subprocess
 import time
 from fractions import Fraction
 from pathlib import Path
@@ -21,7 +22,7 @@ from test_script_limits import script_grader
 from chalk_grader import cgroup
 from chalk_grader import disqualification as dq
 from chalk_grader.cgroup import Cgroup, Events
-from chalk_grader.script_runner import RunError, RunKilled, memory_feedback
+from chalk_grader.script_runner import LAUNCHER, RunError, RunKilled, memory_feedback
 
 needs_cgroup = pytest.mark.skipif(
     cgroup.controller() is None, reason="needs a delegated cgroup (see the docstring)"
@@ -112,11 +113,23 @@ class TestLauncher:
         fake_cgroups()
         assert script_grader(tmp_path, "exit 125\n")("s1", "x").score == dq.Error()
 
-    def test_failure_descriptor_is_closed(self, tmp_path, fake_cgroups) -> None:
+    def test_run_gets_no_other_descriptor(self, tmp_path, fake_cgroups) -> None:
         fake_cgroups()
         body = 'ls /proc/self/fd | wc -l > "$CHALK_RESULT"\n'
         # stdin, stdout, stderr and the directory ls reads.
         assert script_grader(tmp_path, body)("s1", "x").score == 4
+
+    @pytest.mark.parametrize("shell", ["sh", "dash", "bash"])
+    def test_any_posix_shell(self, tmp_path, shell) -> None:
+        # /bin/sh is dash on Debian and Ubuntu, bash elsewhere.
+        path = shutil.which(shell)
+        if path is None:
+            pytest.skip(f"no {shell}")
+        report = tmp_path / "failure"
+        args = ["chalk-run", "", "1048576", "1024", str(report), "echo", "ok"]
+        proc = subprocess.run([path, "-c", LAUNCHER, *args], capture_output=True, text=True)
+        assert (proc.returncode, proc.stdout) == (0, "ok\n")
+        assert not report.exists() or not report.read_text()
 
     def test_sizes_round_up(self, tmp_path, no_cgroups) -> None:
         body = '[ "$(ulimit -f)" = 1 ] && echo 1 > "$CHALK_RESULT" || echo 0 > "$CHALK_RESULT"\n'

@@ -65,12 +65,11 @@ DEFAULT_PROCESSES = 256
 #: it says why on the file descriptor $4, which it closes before the exec,
 #: so the code of the run cannot pass for the launcher.
 LAUNCHER = """\
-fail() { eval 'echo "$1" >&'"$fd"; exit 125; }
-fd=$4
+report=$4
+fail() { echo "$1" > "$report"; exit 125; }
 if [ -n "$1" ]; then echo $$ 2>/dev/null > "$1/cgroup.procs" || fail "cannot join $1"; fi
 if [ -n "$2" ]; then ulimit -v "$2" 2>/dev/null || fail "cannot apply ulimit -v $2"; fi
 if [ -n "$3" ]; then ulimit -f "$3" 2>/dev/null || fail "cannot apply ulimit -f $3"; fi
-eval "exec $fd>&-"
 shift 4
 exec "$@"
 """
@@ -213,7 +212,11 @@ class ScriptRunner:
             # Without a cgroup, the memory the configuration sets is the
             # address space, as before cgroups.
             address_space = limits.memory
-        self._failure, failure = os.pipe()
+        # Where the launcher says why it could not start the run. A file
+        # and not a pipe: /bin/sh may be dash, which only redirects the
+        # descriptors 0 to 9.
+        handle, self._failure_path = tempfile.mkstemp(prefix="chalk-launch-")
+        os.close(handle)
         try:
             launcher = [
                 "/bin/sh",
@@ -223,7 +226,7 @@ class ScriptRunner:
                 str(self._cgroup.path) if self._cgroup else "",
                 _blocks(address_space, 1024),
                 _blocks(limits.file_size, 512),
-                str(failure),
+                self._failure_path,
             ]
             self.process = subprocess.Popen(
                 [*launcher, *self._args],
@@ -232,36 +235,30 @@ class ScriptRunner:
                 stdout=self._slave_pty_fd if self.capture_output else None,
                 stderr=self._slave_pty_fd if self.capture_output else None,
                 stdin=subprocess.DEVNULL,
-                pass_fds=(failure,),
                 # Own process group, so a timeout kills the whole tree and
                 # not only the shell.
                 start_new_session=True,
             )
         except BaseException:
-            os.close(self._failure)
-            self._failure = -1
+            Path(self._failure_path).unlink(missing_ok=True)
             self._close_cgroup()
             raise
-        finally:
-            os.close(failure)
 
     def _launch_failure(self) -> str | None:
         """
         Why the launcher could not start the run, read once the run ended.
         """
+        path = Path(self._failure_path)
         try:
-            os.set_blocking(self._failure, False)
-            data = os.read(self._failure, 4096)
+            data = path.read_bytes()[:4096]
         except OSError:
             data = b""
-        finally:
-            os.close(self._failure)
-            self._failure = -1
+        path.unlink(missing_ok=True)
         return data.decode(errors="replace").strip() or None
 
     def __del__(self) -> None:
-        if getattr(self, "_failure", -1) >= 0:
-            os.close(self._failure)
+        if (failure := getattr(self, "_failure_path", None)) is not None:
+            Path(failure).unlink(missing_ok=True)
         self._kill_group()
         self._close_cgroup()
         shutil.rmtree(getattr(self, "_result_dir", ""), ignore_errors=True)
