@@ -172,7 +172,8 @@ env.PATH = "{node_dir}/bin:{PATH}"
 # The heap of each node isolate. The compiler, node itself and the files of
 # the run take about 110 MiB more, so with a cgroup an answer that allocates
 # without end goes past the memory of the run first and gets memory-limit.
-# elm-test runs {jobs} workers, each with a heap of its own.
+# elm-test runs {jobs} workers, each with a heap of its own; before
+# 0.19.2 it has no --workers and runs one per core.
 env.NODE_OPTIONS = "--max-old-space-size={memory_mib}"
 vars.jobs = "1"
 vars.memory_mib = "512"
@@ -181,6 +182,7 @@ probe.node_dir = 'p=$(command -v node) && dirname "$(dirname "$(readlink -f "$p"
 probe.elm_test = 'p=$(command -v elm-test) && readlink -f "$p"'
 probe.elm_test_dir = 'p=$(command -v elm-test) && dirname "$(dirname "$(readlink -f "$p")")"'
 probe.elm = 'p=$(command -v elm) && readlink -f "$p"'
+probe.elm_test_workers = 'elm-test --help 2>&1 | grep -q -- --workers && echo yes || echo no'
 probe.elm_dir = 'p=$(command -v elm) && dirname "$(readlink -f "$p")"'
 probe.version = "elm --version"
 prepare.commands = [
@@ -191,8 +193,8 @@ build.seed = { ".elm-home" = "{cache}/elm" }
 build.command = "{node} {elm_test} make --compiler {elm}"
 build.timeout = 120
 test.command = """\
-{node} {elm_test} --compiler {elm} --seed 1 --workers {jobs} --report junit \
-> "$CHALK_RESULT\""""
+w=; if [ {elm_test_workers} = yes ]; then w="--workers {jobs}"; fi; \
+{node} {elm_test} --compiler {elm} --seed 1 $w --report junit > "$CHALK_RESULT\""""
 
 [prolog-plunit]
 description = "Prolog program tested with plunit, one swipl process per test"
