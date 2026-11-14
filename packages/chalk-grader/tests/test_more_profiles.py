@@ -12,7 +12,7 @@ from test_sandbox import needs_bwrap
 
 from chalk_grader import disqualification as dq
 from chalk_grader import models
-from chalk_grader.profile_grader import ProfileGrader, resolve_profile
+from chalk_grader.profile_grader import ProfileGrader, resolve_profile, with_limits
 from chalk_grader.profiles import PrepareError, read_stdio_report
 from chalk_grader.runners.stdio import compare
 from chalk_grader.task import Task
@@ -142,6 +142,27 @@ for case in Path("tests").glob("*.in"):
         assert graded.score == Fraction(1, 3)
         assert "tests/02: timed out after 1s" in (graded.feedback or "")
         assert "tests/03: exited with code 3" in (graded.feedback or "")
+
+    def test_memory_limit(self, stdio_template, tmp_path, sandbox) -> None:
+        solution = make_tree(tmp_path / "sol", {"main.py": "print(sum(map(int, input().split())))"})
+        program = (
+            "a, b = map(int, input().split())\n"
+            "if a == 10:\n    x = bytearray(400 * 2**20)\n"
+            "print(a + b)\n"
+        )
+        root = make_tree(tmp_path / "s", {"main.py": program})
+
+        def grade(memory: str):
+            limits = models.Limits(memory=memory)
+            g = grader(
+                "stdio", stdio_template, solution, sandbox=sandbox, vars=self.run, limits=limits
+            )
+            return g("s1", root)
+
+        graded = grade("200MiB")
+        assert graded.score == Fraction(2, 3)
+        assert "tests/02: exited with code 1" in (graded.feedback or "")
+        assert grade("1GiB").score == 1
 
 
 @pytest.mark.skipif(not shutil.which("cc"), reason="cc is needed")
@@ -320,3 +341,18 @@ def test_elm(elm_template, tmp_path, sandbox, tmp_path_factory) -> None:
 
     broken = make_tree(tmp_path / "b", elm_calc(sub="a -"))
     assert g("s3", broken).score == dq.BuildError()
+
+    # Each element is a list of its own, so the memory runs out long before
+    # the time does: the heap of node (error) or, with a cgroup, often the
+    # memory of the run first (memory-limit).
+    greedy = elm_calc(sub="List.length (List.map List.singleton (List.range 1 100000000))")
+    graded = g("s4", make_tree(tmp_path / "g", greedy))
+    assert graded.score in (dq.Error(), dq.MemoryLimit())
+
+
+def test_limits_set_the_memory_of_the_step() -> None:
+    variables = {"memory_mib": "512", "jobs": "1"}
+    assert with_limits(variables, None) == variables
+    assert with_limits(variables, models.Limits()) == variables
+    limits = models.Limits(memory="1GiB")
+    assert with_limits(variables, limits) == {"memory_mib": "1024", "jobs": "1"}

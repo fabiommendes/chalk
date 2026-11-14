@@ -23,6 +23,27 @@ class Limits(BaseModel):
         ByteSize | None,
         Field(
             description=(
+                "Memory a run may take, files in its /tmp included. A run that goes past it "
+                "is killed and gets the memory-limit result. Profiles also turn it into "
+                "the limits of their runtime, such as the heap of Node, through the "
+                "{memory_mib} variable; without it, the profile's default applies."
+            ),
+        ),
+    ] = None
+    processes: Annotated[
+        int | None,
+        Field(
+            description=(
+                "Most processes and threads a run may have at once (pids.max of its "
+                "cgroup). Defaults to 256."
+            ),
+            gt=0,
+        ),
+    ] = None
+    address_space: Annotated[
+        ByteSize | None,
+        Field(
+            description=(
                 "Address space limit of the script and each process it starts (RLIMIT_AS). "
                 "Runtimes that reserve large virtual areas, such as Node and the JVM, need "
                 "a generous value."

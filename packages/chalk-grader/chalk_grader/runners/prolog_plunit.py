@@ -11,11 +11,14 @@ uses only the standard library and is started with `python -I`.
 
 Usage:
 
-    prolog_plunit.py --swipl SWIPL --answer FILE --report FILE [--timeout SECONDS] PATH...
+    prolog_plunit.py --swipl SWIPL --answer FILE --report FILE [--timeout SECONDS]
+        [--memory MIB] PATH...
 
 PATH is a Prolog file of tests or a directory searched for `*.pl` files. The
 report has a `testcase` for each test of the PATHs, with `classname` set to
-the plunit unit.
+the plunit unit. --memory is the memory of the swipl process of each test;
+its stacks get 64 MiB less, so a test that goes past them fails with a
+resource error, on its own, before the memory of the run is exhausted.
 """
 
 import argparse
@@ -32,6 +35,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PROLOG = HERE / "prolog_plunit.pl"
 
+#: Memory of a swipl process besides its stacks, in MiB.
+STACK_MARGIN = 64
+
 #: Longest incomplete line kept while looking for the verdict, in bytes.
 MAX_LINE = 64 * 1024
 
@@ -42,13 +48,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--answer", required=True)
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=5.0)
+    parser.add_argument("--memory", type=int, help="stack limit of each test, in MiB")
     parser.add_argument("paths", nargs="+", type=Path)
     args = parser.parse_args(argv)
 
     files = find_files(args.paths)
     suite = ET.Element("testsuite", name="plunit")
     for unit, test in list_tests(args.swipl, files):
-        error = run_test(args.swipl, args.answer, unit, test, files, args.timeout)
+        error = run_test(
+            args.swipl, args.answer, unit, test, files, args.timeout, memory=args.memory
+        )
         case = ET.SubElement(suite, "testcase", classname=unit, name=test)
         if error is not None:
             ET.SubElement(case, "failure", message=error)
@@ -67,8 +76,9 @@ def find_files(paths: list[Path]) -> list[str]:
     return files
 
 
-def swipl_command(swipl: str, *args: str) -> list[str]:
-    return [swipl, "-q", "-f", "none", str(PROLOG), "--", *args]
+def swipl_command(swipl: str, *args: str, memory: int | None = None) -> list[str]:
+    limit = [f"--stack-limit={max(memory - STACK_MARGIN, 16)}m"] if memory else []
+    return [swipl, *limit, "-q", "-f", "none", str(PROLOG), "--", *args]
 
 
 def list_tests(swipl: str, files: list[str]) -> list[tuple[str, str]]:
@@ -94,13 +104,20 @@ def list_tests(swipl: str, files: list[str]) -> list[tuple[str, str]]:
 
 
 def run_test(
-    swipl: str, answer: str, unit: str, test: str, files: list[str], timeout: float
+    swipl: str,
+    answer: str,
+    unit: str,
+    test: str,
+    files: list[str],
+    timeout: float,
+    *,
+    memory: int | None = None,
 ) -> str | None:
     """
     Run one test. Return None when it passed, or why it did not.
     """
     secret = secrets.token_hex(16)
-    command = swipl_command(swipl, "test", answer, unit, test, *files)
+    command = swipl_command(swipl, "test", answer, unit, test, *files, memory=memory)
     try:
         proc = subprocess.Popen(
             command,

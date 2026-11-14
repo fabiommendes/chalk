@@ -179,7 +179,7 @@ dev = [
 
 [[package]]
 name = "chalk-grader"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/chalk-grader" }
 dependencies = [
     { name = "gitignore-lib" },

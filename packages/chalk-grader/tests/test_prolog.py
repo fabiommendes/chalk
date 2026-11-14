@@ -45,6 +45,9 @@ REVERSIBLE = "fat(5, 120).\nfat(X, 120) :- X = 5.\n"
 #: Loops forever on fat(5, F) only.
 LOOP = "fat(N, _) :- N == 5, repeat, fail.\n" + CORRECT
 
+#: Builds a list far larger than the stack limit on fat(5, F) only.
+GREEDY = "fat(N, _) :- N == 5, numlist(1, 100000000, L), length(L, _), fail.\n" + CORRECT
+
 #: Both tests need the whole file to load, so they are all-or-nothing here.
 NOT_LOADING = "fat(0,1\nfat(N,F) :- .\n"
 
@@ -93,6 +96,11 @@ class TestScores:
         assert graded.score == Fraction(1, 2)
         assert "fat5" in graded.feedback
         assert time.monotonic() - start < 30
+
+    def test_memory_limit_fails_only_that_test(self, template, sandbox) -> None:
+        graded = prolog(template, GREEDY, sandbox, vars={"memory_mib": "64"})
+        assert graded.score == Fraction(1, 2)
+        assert "fat5" in graded.feedback
 
     def test_code_that_does_not_load_is_a_build_error(self, template, sandbox) -> None:
         graded = prolog(template, NOT_LOADING, sandbox)

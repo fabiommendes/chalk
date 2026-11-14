@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING, Any, Literal, TypeIs, overload
 from rich.console import RenderableType
 from rich.text import Text
 
-from chalk_grader.disqualification import BuildError, Disqualified, Error, InvalidInput, Timeout
+from chalk_grader.disqualification import (
+    BuildError,
+    Disqualified,
+    Error,
+    InvalidInput,
+    MemoryLimit,
+    Timeout,
+)
 
 from ..util.parsing import Parsed
 from ..util.sequence import unique
@@ -23,6 +30,7 @@ __all__ = [
     "InvalidInput",
     "Error",
     "BuildError",
+    "MemoryLimit",
     "parse",
     "merge",
 ]
@@ -133,6 +141,9 @@ def read(src: str) -> Parsed[Disqualification]:
 
     if src.startswith("build-error"):
         return Parsed(src.removeprefix("build-error"), BuildError())
+
+    if src.startswith("memory-limit"):
+        return Parsed(src.removeprefix("memory-limit"), MemoryLimit())
 
     if src.startswith("error"):
         return Parsed(src.removeprefix("error"), Error())

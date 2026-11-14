@@ -38,12 +38,12 @@ class TestScriptLimits:
         graded = grader("s1", "x", keep_files=True)
         assert graded.score <= 1000
 
-    def test_memory(self, tmp_path) -> None:
+    def test_address_space(self, tmp_path) -> None:
         body = (
             "python3 -c 'b = bytearray(400_000_000)' && echo 1 > \"$CHALK_RESULT\""
             ' || echo 0 > "$CHALK_RESULT"\n'
         )
-        grader = script_grader(tmp_path, body, limits={"memory": "200MB"})
+        grader = script_grader(tmp_path, body, limits={"address_space": "200MB"})
         assert grader("s1", "x").score == 0
 
     def test_podman_not_implemented(self, tmp_path) -> None:

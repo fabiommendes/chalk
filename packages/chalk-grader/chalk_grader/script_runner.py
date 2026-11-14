@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import pty
 import re
-import resource
 import shutil
 import signal
 import subprocess
@@ -16,8 +15,9 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
+from . import cgroup, models
 from . import disqualification as dq
-from . import models
+from .cgroup import Cgroup, Events
 from .disqualification import Disqualified
 from .graded import CaseResult, Graded
 from .repo import Repo
@@ -26,8 +26,11 @@ from .sandbox import bwrap_command
 from .score import Score
 
 __all__ = [
+    "DEFAULT_PROCESSES",
+    "LAUNCHER",
     "ChalkEnv",
     "Result",
+    "RunKilled",
     "ScriptRunner",
 ]
 log = getLogger(__name__)
@@ -50,6 +53,22 @@ PASS_ENV = (
     "PYTHONPATH",
     "PYTHONHOME",
 )
+#: Most processes and threads a run may have at once, when the limits do
+#: not say (pids.max of its cgroup).
+DEFAULT_PROCESSES = 256
+
+#: Shell script that starts every run: it joins the cgroup of the run ($1),
+#: applies the address space ($2, KiB) and file size ($3, 512-byte blocks)
+#: limits and executes the rest of its arguments. It replaces preexec_fn,
+#: which may deadlock the child of a process with threads.
+LAUNCHER = """\
+if [ -n "$1" ]; then echo $$ > "$1/cgroup.procs" || exit 125; fi
+if [ -n "$2" ]; then ulimit -v "$2" || exit 125; fi
+if [ -n "$3" ]; then ulimit -f "$3" || exit 125; fi
+shift 3
+exec "$@"
+"""
+
 ANSI_REGEX = re.compile(r"(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
 
 
@@ -67,6 +86,14 @@ class Result:
 
     def __bool__(self) -> bool:
         return self.return_code == 0
+
+
+class RunKilled(RuntimeError):
+    """
+    The system killed a process of the run, for a reason that is not the
+    answer's fault, such as the memory of the machine running out. The run
+    may pass on another try.
+    """
 
 
 class ScriptRunner:
@@ -128,7 +155,7 @@ class ScriptRunner:
             else:
                 env[key] = value
 
-        args: str | list[str] = command
+        args = ["/bin/sh", "-c", command]
         if sandbox is not None:
             readable = (
                 [*sandbox.readable] if script_path is None else [script_path, *sandbox.readable]
@@ -144,10 +171,40 @@ class ScriptRunner:
                 hidden=sandbox.hidden,
             )
 
-        self.process = subprocess.Popen(
-            args,
-            shell=sandbox is None,
-            cwd=repo.root,
+        self._cgroup: Cgroup | None = None
+        if (cgroups := cgroup.controller()) is not None:
+            limits = limits or models.Limits()
+            memory = None if limits.memory is None else int(limits.memory)
+            processes = DEFAULT_PROCESSES if limits.processes is None else limits.processes
+            self._cgroup = cgroups.create(memory=memory, processes=processes)
+        try:
+            self.process = self._start(args, limits, repo.root, env, capture_output)
+        except BaseException:
+            self._close_cgroup()
+            raise
+
+    def _start(
+        self,
+        args: list[str],
+        limits: models.Limits | None,
+        cwd: Path,
+        env: dict[str, str],
+        capture_output: bool,
+    ) -> subprocess.Popen[bytes]:
+        address_space = limits and limits.address_space
+        file_size = limits and limits.file_size
+        launcher = [
+            "/bin/sh",
+            "-c",
+            LAUNCHER,
+            "chalk-run",
+            str(self._cgroup.path) if self._cgroup else "",
+            str(int(address_space) // 1024) if address_space else "",
+            str(int(file_size) // 512) if file_size else "",
+        ]
+        return subprocess.Popen(
+            [*launcher, *args],
+            cwd=cwd,
             env=env,
             stdout=self._slave_pty_fd if capture_output else None,
             stderr=self._slave_pty_fd if capture_output else None,
@@ -155,12 +212,25 @@ class ScriptRunner:
             # Own process group, so a timeout kills the whole tree and not
             # only the shell.
             start_new_session=True,
-            preexec_fn=_rlimit_setter(limits) if limits else None,
         )
 
     def __del__(self) -> None:
         self._kill_group()
+        self._close_cgroup()
         shutil.rmtree(getattr(self, "_result_dir", ""), ignore_errors=True)
+
+    def _close_cgroup(self) -> Events | None:
+        """
+        Kill what is left of the run, remove its cgroup and return what
+        happened in it.
+        """
+        group = getattr(self, "_cgroup", None)
+        if group is None:
+            return None
+        self._cgroup = None
+        events = group.events()
+        group.close()
+        return events
 
     def _kill_group(self) -> None:
         """
@@ -182,7 +252,22 @@ class ScriptRunner:
             timeout = self._run_no_capture()
             stdout = ""
         self._kill_group()
+        events = self._close_cgroup()
         self._repo.write_file(self._log_name, stdout)
+        student = self._chalk_env.student_id
+        if events is not None and events.pids_max:
+            log.info(f"The run of {student} reached its process limit {events.pids_max} times")
+        if events is not None and events.over_memory:
+            shutil.rmtree(self._result_dir, ignore_errors=True)
+            return Result(
+                return_code=self.process.returncode,
+                score=dq.MemoryLimit(),
+                feedback=memory_feedback(events),
+                stdout=stdout,
+            )
+        if events is not None and events.killed_from_outside:
+            shutil.rmtree(self._result_dir, ignore_errors=True)
+            raise RunKilled(f"the system killed a process of the run of {student}")
 
         # The script may hang (timeout=True), and even so it may generate a valid report file.
         # We test this here and only create a timeout score if the report file is not generated.
@@ -193,7 +278,6 @@ class ScriptRunner:
 
         if result is None:
             if self._expect_result:
-                student = self._chalk_env.student_id
                 log.warning(
                     f"Process terminated without generating report file for student {student}"
                 )
@@ -377,25 +461,10 @@ class ChalkEnv:
         return base
 
 
-def _rlimit_setter(limits: models.Limits) -> Callable[[], None] | None:
-    """
-    Function that applies the given limits in the child process, before the
-    script starts. The limits are inherited by every process the script
-    starts.
-    """
-    pairs = [
-        (resource.RLIMIT_AS, limits.memory),
-        (resource.RLIMIT_FSIZE, limits.file_size),
-    ]
-    pairs = [(kind, int(value)) for kind, value in pairs if value is not None]
-    if not pairs:
-        return None
-
-    def apply() -> None:
-        for kind, value in pairs:
-            resource.setrlimit(kind, (value, value))
-
-    return apply
+def memory_feedback(events: Events) -> str:
+    if events.limit is None:
+        return "The answer used more memory than it may."
+    return f"The answer used more than {events.limit // 2**20} MiB of memory."
 
 
 def remove_ansi_codes(src: str) -> str:

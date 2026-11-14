@@ -163,14 +163,44 @@ questions:
     autograder:
       timeout: 60
       limits:
-        memory: 1GB        # address space of each process (RLIMIT_AS)
+        memory: 1GB        # memory of each run (see below)
+        processes: 256     # processes and threads of each run (default 256)
+        address_space: 2GB # address space of each process (RLIMIT_AS)
         file_size: 50MB    # largest file a process can write
         answer_size: 1MB   # larger text answers are rejected (default 1 MiB)
 ```
 
-`memory` limits virtual memory, not resident memory. Node, the JVM and Go
-reserve large virtual areas at startup, so give them a generous value or
-leave `memory` unset.
+Each run (the build, then the tests) gets a Linux cgroup of its own, with
+`memory` and `processes` as its limits. A run that goes past `memory` is
+killed, whole, and the answer gets the `memory-limit` result. A run that
+reaches `processes` cannot start more, and goes on. Files the run writes to
+`/tmp` count as memory. Nothing a run does reaches the other runs or chalk.
+
+Profiles have a default `memory`, and also turn it into a limit their
+runtime understands, so that a test that takes too much fails on its own:
+
+| Profile | Default | Limit of the runtime |
+|---|---|---|
+| `python-pytest` | 1 GiB | address space of pytest and the code it runs |
+| `stdio`, `c-stdio` | 512 MiB | address space of the program |
+| `elm-test` | 512 MiB | heap of node |
+| `prolog-plunit` | 512 MiB | stacks of each test, 64 MiB less |
+| `c-make` | 1 GiB | none: AddressSanitizer reserves terabytes |
+| `rust-cargo` | 2 GiB | none; the budget includes the build |
+
+The profiles also run one test at a time (`vars.jobs`, default 1), since
+`chalk` and the codehood worker may grade several answers at once. A
+profile of your own reads the limit as `{memory_mib}`, in MiB.
+
+The cgroups need a cgroup v2 delegated to chalk. `chalk autograde` and
+`chalk codehood autograde` run themselves again with
+`systemd-run --user --scope -p Delegate=yes`, which any Linux with systemd
+has. Without it (no systemd, a container without delegation), chalk warns
+once, and the limits of the runtimes above are all there is.
+
+`address_space` limits virtual memory, not resident memory, of the script
+and every process it starts. Node, the JVM and Go reserve large virtual
+areas at startup, so give them a generous value or leave it unset.
 
 The environment of the script only has `PATH`, `HOME`, the locale variables
 and a few others. Add more with `autograder.pass_env`:
@@ -361,7 +391,7 @@ questions:
       build:
         timeout: 180           # build step, default 120
         limits:
-          memory: 4GB
+          address_space: 4GB
       on_build_error: manual   # build-error (default) | zero | manual
 ```
 
@@ -464,7 +494,7 @@ run_tests: tests/test_calc.c calc.c
   `$(LDFLAGS)`.
 - Chalk compiles with AddressSanitizer and UndefinedBehaviorSanitizer, so
   an invalid memory access or undefined behavior fails the test instead of
-  passing by luck. Do not set `limits.memory` with this profile:
+  passing by luck. Do not set `limits.address_space` with this profile:
   AddressSanitizer reserves a large address space.
 - Each test runs in its own process. A crash or an endless loop fails
   only that test (`vars.test_timeout`, default 5 seconds).

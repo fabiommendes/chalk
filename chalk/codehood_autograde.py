@@ -405,6 +405,8 @@ def to_feedback(graded: Graded, tests: dict[Any, str]) -> tuple[str, str, str | 
         return "0/1", _build_message(graded.feedback), notes
     if score == dq.Timeout():
         return "0/1", "O programa excedeu o tempo limite.", notes
+    if score == dq.MemoryLimit():
+        return "0/1", "O programa excedeu o limite de memória.", notes
     return "0/1", graded.feedback or str(score.message()), notes
 
 

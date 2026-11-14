@@ -10,7 +10,7 @@ from typing import Literal
 from rich.console import RenderableType
 from rich.text import Text
 
-__all__ = ["Disqualified", "Timeout", "InvalidInput", "Error", "BuildError"]
+__all__ = ["Disqualified", "Timeout", "InvalidInput", "Error", "BuildError", "MemoryLimit"]
 
 
 class Disqualified(Enum):
@@ -22,6 +22,7 @@ class Disqualified(Enum):
     INVALID_INPUT = "The response contains text with an invalid syntax."
     ERROR = "Internal error during grading."
     BUILD_ERROR = "The response does not compile."
+    MEMORY_LIMIT = "The response used more memory than it may."
 
     def message(self) -> str:
         return self.value
@@ -68,3 +69,11 @@ def BuildError() -> Disqualified:
     Indicates that the response does not compile, so its tests could not run.
     """
     return Disqualified.BUILD_ERROR
+
+
+def MemoryLimit() -> Disqualified:
+    """
+    Indicates that a response was disqualified for using more memory than
+    its run may.
+    """
+    return Disqualified.MEMORY_LIMIT

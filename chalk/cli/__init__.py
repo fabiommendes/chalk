@@ -1,4 +1,8 @@
+import sys
+
 import typer
+
+from chalk_grader.cgroup import reexec_delegated
 
 from . import (
     autograde_cmd,
@@ -45,5 +49,14 @@ show_cmd.add_show_command(app)
 response_cmds.add_response_commands(app)
 
 
+#: Commands that grade: they run again in a cgroup of their own, so that
+#: each run gets a memory and process limit (see chalk_grader.cgroup).
+GRADING_COMMANDS = (("autograde",), ("codehood", "autograde"))
+
+
 def main() -> None:
+    words = [arg for arg in sys.argv[1:] if not arg.startswith("-")]
+    grading = any(tuple(words[: len(c)]) == c for c in GRADING_COMMANDS)
+    if grading and "--help" not in sys.argv:
+        reexec_delegated()
     app()

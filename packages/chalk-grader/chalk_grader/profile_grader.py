@@ -46,6 +46,8 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
+from pydantic import ByteSize
+
 from . import disqualification as dq
 from . import models
 from .graded import DEFAULT_TIMEOUT, Graded
@@ -72,6 +74,8 @@ log = getLogger(__name__)
 
 #: Largest compiler output kept as feedback, in characters.
 MAX_BUILD_FEEDBACK = 8000
+
+MiB = 1024 * 1024
 
 #: Profiles implemented in Python, not as data.
 CODE_PROFILES = ("script", "regex")
@@ -140,6 +144,30 @@ def _merge(base: dict, child: Mapping) -> dict:
         else:
             out[key] = value
     return out
+
+
+def with_limits(variables: Mapping[str, str], limits: models.Limits | None) -> dict[str, str]:
+    """
+    The variables of a step with the limits of the step: `limits.memory`
+    sets {memory_mib}, which the profile turns into the limits of its
+    runtime. Without it, the profile's own `vars.memory_mib` stays.
+    """
+    out = dict(variables)
+    if limits is not None and limits.memory is not None:
+        out["memory_mib"] = str(max(1, int(limits.memory) // MiB))
+    return out
+
+
+def step_limits(limits: models.Limits | None, variables: Mapping[str, str]) -> models.Limits:
+    """
+    The limits of a step, with the memory of the profile ({memory_mib})
+    when the limits do not set one: the memory of the cgroup of the run.
+    """
+    limits = limits or models.Limits()
+    memory = variables.get("memory_mib", "")
+    if limits.memory is None and memory.isdigit():
+        return limits.model_copy(update={"memory": ByteSize(int(memory) * MiB)})
+    return limits
 
 
 def render(text: str, variables: Mapping[str, str]) -> str:
@@ -297,7 +325,6 @@ class ProfileGrader(ScriptGrader):
             )
         run: dict[str, Any] = dict(
             env=env,
-            extra_env=self._env(variables),
             on_output_line=on_output_line,
             capture_output=capture_output,
             sandbox=sandbox,
@@ -307,22 +334,32 @@ class ProfileGrader(ScriptGrader):
             seed_workdir(
                 repo.root, {dest: Path(render(src, variables)) for dest, src in build.seed.items()}
             )
+            limits = self.conf.build.limits or build.limits or self.conf.limits
+            build_variables = with_limits(variables, limits)
+            limits = step_limits(limits, build_variables)
             result = ScriptRunner(
                 None,
                 repo,
-                command=self._command(build.command, variables),
+                command=self._command(build.command, build_variables),
+                extra_env=self._env(build_variables),
                 timeout=self.conf.build.timeout or build.timeout or timeout,
-                limits=self.conf.build.limits or build.limits or self.conf.limits,
+                limits=limits,
                 log_name="chalk.build",
                 expect_result=False,
                 **run,
             ).run()
             if result.score == dq.Timeout():
                 return replace(result, feedback="The build took too long.")
+            if result.score == dq.MemoryLimit():
+                return result
             if result.return_code != 0:
                 return self._build_error(result)
 
         test = self.spec.test
+        limits = test.limits or self.conf.limits
+        variables = with_limits(variables, limits)
+        limits = step_limits(limits, variables)
+        run["extra_env"] = self._env(variables)
         command = self._command(test.command, variables)
         services = None
         if self.spec.services:
@@ -360,7 +397,7 @@ class ProfileGrader(ScriptGrader):
                 command=command,
                 result_reader=read,
                 timeout=test.timeout or timeout,
-                limits=test.limits or self.conf.limits,
+                limits=limits,
                 **run,
             ).run()
         finally:
