@@ -8,7 +8,7 @@ creator: claude
 
 # Limites de memória e de processos por correção
 
-Estado em 2026-11-13. Rascunho. Continua o item "limite de memória,
+Estado em 2026-11-16. Rascunho. Continua o item "limite de memória,
 processos e disco" que ficou em aberto em
 `dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md` (estado atual,
 item 5, e a fase 8, que já citava `systemd-run --user --scope` em volta do
@@ -311,30 +311,122 @@ em vez de `preexec_fn`, e o comportamento de hoje.
    - Na saída abrupta (segundo Ctrl+C, abort da TUI, segundo SIGHUP) o
      worker mata os `run-*` antes do `os._exit`, que pula o `atexit`.
 
+5. **Feita (2026-11-16).** Pontas soltas, no `chalk-grader` (commits
+   `caee6c1` a `c5d3159`, sem versão nova). Decisões:
+   - **Referência que estoura a memória:** `ReferenceMemoryLimit`, subclasse
+     de `PrepareError` em `chalk_grader.profiles`, levantada por
+     `ProfileGrader.prepare()` quando a execução da referência dá
+     `dq.MemoryLimit()`, antes da checagem de "no tests". A mensagem diz o
+     orçamento em MiB (atributo `memory`, em bytes, `None` sem limite) e
+     sugere `vars.memory_mib` ou `limits.memory`; `Result.memory_limit`
+     leva o `memory.max` da execução até lá. O `chalk-worker` pode tratá-la
+     como erro da questão, que gasta tentativas. No chalk nada mudou: o
+     `chalk codehood autograde` já aborta a questão com a mensagem de
+     qualquer `PrepareError`, e o `codehood check` também a mostra.
+   - **`prepare` e probes num cgroup `run-*` próprio** (`run_trusted` em
+     `script_runner.py`, com o `LAUNCHER`), com teto generoso:
+     `TRUSTED_MEMORY` = 4 GiB e `TRUSTED_PROCESSES` = 1024. São comandos
+     confiáveis do perfil; o limite só impede que um comando quebrado tome
+     a máquina, não é orçamento. Medido (`memory.peak`, que conta o cache de
+     página dos downloads): `elm-test make` 537 a 658 MiB, mais que os
+     512 MiB de uma execução Elm; `uv sync` 98 MiB num projeto pequeno e
+     382 MiB com pandas; `cargo fetch` 25 MiB; `cargo build` de uma crate
+     pequena em 16 núcleos 111 MiB, que cresce com a crate e os núcleos
+     (o `prepare` do rust não usa `--jobs`); probes até 41 MiB. No fim, ou
+     no timeout, o cgroup é morto e removido: antes, o `subprocess.run`
+     matava só o shell no timeout, e o que o comando deixava em segundo
+     plano ficava órfão. Um comando que passa do teto falha com "(it used
+     more than 4096 MiB)" no `PrepareError`. Sem cgroup, roda como antes,
+     mas num grupo de processos próprio, morto no timeout.
+   - **Serviços:** um cgroup por serviço, com os mesmos limites, morto e
+     removido no `stop`. Um serviço que passa do teto só gera um aviso no
+     log: o efeito sobre a correção (testes do serviço falhando) já aparece
+     no relatório.
+   - **Nova tentativa depois de `RunKilled` reinicia os serviços**
+     (`Services.restart`, chamado pelo `before_retry` do `ScriptRunner`).
+     Um serviço pode guardar estado (o relatório conta o que recebeu), e
+     reaproveitá-lo daria à segunda tentativa o que a primeira mandou. Os
+     sockets ficam nos mesmos caminhos, então o comando e o sandbox do teste
+     não mudam. Se um serviço não sobe de novo, é `RunError`.
+   - **`systemd-oomd`.** Investigado no código do systemd (`src/oom/`,
+     `src/core/cgroup.c`) e com experimentos curtos num escopo delegado
+     (systemd 262, CachyOS):
+     - Configuração desta máquina: `slice.d/10-oomd-per-slice-defaults.conf`
+       do systemd do usuário põe `ManagedOOMMemoryPressure=kill` com 80% em
+       toda slice do usuário (`app.slice`, onde caem os escopos do
+       `systemd-run --user --scope`, `background.slice` etc.), e há
+       monitoramento de swap a 90%. O padrão do oomd (60% por 30 s) só vale
+       para unidades sem limite próprio. O escopo do grader não é
+       monitorado por si.
+     - O oomd compara a linha **`full`** do `memory.pressure` (avg10) da
+       unidade monitorada com o limite, por 30 s seguidos, e só age se
+       houve reclaim recente. Os candidatos são os cgroups folha **e os com
+       `memory.oom.group=1`** abaixo dela; escolhe o de maior taxa de
+       `pgscan` e mata só ele (`cgroup.kill`). Os `run-*` são candidatos
+       (folha e `oom.group=1`); o escopo do grader não é (tem filhos e
+       `oom.group=0`); o `supervisor/` é (folha).
+     - (a) **Uma resposta que bate no próprio limite não leva o oomd a
+       matar o escopo.** Medido: estouro de memória anônima com
+       `memory.swap.max=0` morre em 0,05 s, com 1,7 ms de stall no escopo;
+       uma execução que relê um arquivo de 256 MiB em disco com
+       `memory.max` de 64 MiB por 4 s teve `full` avg10 de 0,36% no
+       próprio cgroup e 0,14 a 0,18% na `app.slice`, longe de 80% por
+       30 s (e o timeout padrão da execução é 30 s). `full` na slice
+       exige todas as tarefas dela paradas ao mesmo tempo. Se o oomd agir
+       por pressão vinda de fora (navegador), quem ele escolhe é uma folha:
+       uma execução ou o `supervisor/`.
+     - (b) **`ManagedOOMPreference` vale em cgroup de usuário**, não só de
+       root: no caminho de pressão, o oomd lê os xattrs `user.oomd_avoid`
+       e `user.oomd_omit` de um cgroup que não é de root se o dono dele é
+       o mesmo da unidade monitorada (aqui, uid 1000 nos dois). No caminho
+       de swap, só em cgroup de root. Mas `systemd-run -p
+       ManagedOOMPreference=avoid` grava o xattr no cgroup do escopo, que
+       não é candidato, e o xattr não é herdado: não serve.
+     - (c) **Feito:** o grader grava `user.oomd_avoid` no próprio
+       `supervisor/` (gravação confirmada; falha só gera log de depuração),
+       e o oomd escolhe uma execução antes dele. E o oomd marca o cgroup que
+       mata com o xattr `user.oomd_ooms`: `Events.oomd` o lê, e uma execução
+       com limite próprio morta pelo oomd vira `RunKilled` (roda de novo
+       uma vez), em vez de um `SIGKILL` comum. Sem limite próprio, conta
+       como `MemoryLimit`, como um OOM global. O código do aluno não forja
+       o xattr: dentro do bwrap, `/sys` é somente leitura (testado: `EROFS`).
+       `memory.high` não foi usado: ele estrangula a execução em vez de
+       encerrá-la, o que aumenta a pressão em vez de reduzi-la. O swap não
+       preocupa: as execuções têm `memory.swap.max=0`, e o oomd só escolhe
+       por swap cgroups com mais de 5% do swap total.
+     - Não dá para provocar um kill real do oomd sem deixar a máquina sob
+       pressão por 30 s; o caminho foi testado com o xattr gravado à mão.
+   - **Disco:** `limits.file_size` passa a ter padrão de 256 MiB
+     (`TEST_FILE_SIZE`) no passo de teste dos perfis, quando os limites do
+     passo não definem outro. Não no build nem no `prepare` (o rustc e o cc
+     gravam binários grandes), nem no perfil `script`. Seguro para os perfis
+     embutidos: o passo de teste deles não grava nada grande (o `cargo
+     nextest run` não recompila depois do build, verificado; o `elm-test`
+     compila no teste, mas o JS gerado tem poucos MiB). O limite é por
+     arquivo: impede encher o disco com um arquivo só, não com muitos.
+   - **CI:** `taiki-e/install-action@v2` instala o `cargo-nextest`, e os
+     testes do `rust-cargo` passam a rodar lá (não verificado: o CI não roda
+     daqui).
+   - **O compilador no mesmo cgroup da build:** fechado. Os picos medidos da
+     build ficam bem abaixo dos padrões: `elm-test make` do aluno 126 MiB
+     contra 512 MiB, `c-make` 135 MiB contra 1 GiB, `rust-cargo` 476 MiB
+     (`-j1`) contra 2 GiB, todos com folga de 4× ou mais. E a referência
+     passa pela mesma build no `prepare`: um projeto cujo compilador não
+     cabe no orçamento falha lá, como `ReferenceMemoryLimit`, antes de
+     qualquer aluno. O que sobra é uma resposta que faz o compilador
+     explodir (tabelas enormes, macros recursivas), e aí a culpa é dela.
+     Uma questão com build pesada usa `build.limits`.
+
 ## Em aberto
 
-- O `systemd-oomd` mata o cgroup inteiro sem passar pelo OOM killer do
-  kernel: não gera `oom_kill` em `memory.events`, então a culpa não é
-  atribuída nem há nova tentativa. A execução morta por ele parece um
-  `SIGKILL` comum.
-- Uma referência que estoura a memória dentro do `ProfileGrader.prepare()`
-  (descoberta dos testes) sai como `PrepareError` genérico, e o worker a
-  trata como falha de preparo: os jobs voltam à fila sem gastar tentativas,
-  para sempre. O motor deveria distinguir esse caso (por exemplo, um
-  `PrepareError` com `MemoryLimit` como causa).
-- Os comandos de `prepare` e os `services` ainda rodam sem cgroup próprio
-  (no `supervisor/`, junto com o grader). Uma nova tentativa depois de
-  `RunKilled` reaproveita os serviços já iniciados.
-- O CI não tem `cargo-nextest`, então os testes do `rust-cargo` não rodam
-  lá.
-
-- `systemd-oomd`: com `memory.max` por execução e sem swap, a pressão fica
-  contida. Falta verificar se a unidade do worker precisa de
-  `ManagedOOMPreference=avoid` e se isso vale numa unidade de usuário.
-- Disco: um aluno pode encher o tmpfs de `/tmp` (que conta como memória no
-  cgroup, então já é limitado) ou o disco do `--cache-dir`. Um
-  `RLIMIT_FSIZE` padrão cobre o caso simples.
-- O compilador (por exemplo, `elm make`) roda dentro do mesmo cgroup da
-  build. Um limite apertado demais para ele vira `dq.MemoryLimit` contra o
-  aluno. O padrão de cada perfil precisa de folga para a build, ou de um
-  limite próprio para ela (`build.limits` já existe).
+- O `systemd-oomd` ainda pode escolher uma execução sob pressão vinda de
+  fora do grader, se ela for a folha com mais reclaim. Agora isso vira
+  `RunKilled` e nova tentativa, mas nenhum kill real do oomd foi observado.
+- O limite de disco é por arquivo. Uma resposta pode encher o disco do
+  `--cache-dir` ou do diretório de trabalho com muitos arquivos menores
+  (em `/tmp` em tmpfs, eles contam como memória da execução). Uma cota de
+  disco por execução exigiria um sistema de arquivos próprio (tmpfs com
+  `size=`, no sandbox).
+- O teto dos comandos confiáveis (4 GiB) é fixo. Um `prepare` que precise
+  de mais (uma crate grande com `cargo build` em todos os núcleos) falha
+  com mensagem clara, mas não há como subir o teto pela configuração.

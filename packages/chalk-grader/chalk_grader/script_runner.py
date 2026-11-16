@@ -343,6 +343,8 @@ class ScriptRunner:
         if (failure := self._launch_failure()) is not None:
             shutil.rmtree(self._result_dir, ignore_errors=True)
             raise RunError(f"cannot start the run of {student}: {failure}")
+        if events is not None and events.peak is not None:
+            log.debug(f"The run of {student} took up to {events.peak // 2**20} MiB")
         if events is not None and events.pids_max:
             log.info(f"The run of {student} reached its process limit {events.pids_max} times")
         if events is not None and events.over_memory:
