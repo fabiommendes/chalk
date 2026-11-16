@@ -25,7 +25,7 @@ graded = grader("student-id", "module Main exposing (..)\n...")
 ```
 
 Linux only: student code runs under [bubblewrap](https://github.com/containers/bubblewrap)
-(`bwrap`). The security model is in
+(`bwrap`) 0.8.0 or newer. The security model is in
 [dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md](https://github.com/fabiommendes/chalk/blob/main/dev/rfc/modelo-de-seguranca-e-sandbox-do-autograder.md)
 (in Portuguese), and the profiles are documented in
 [docs/user-manual/autograding-scripts.md](https://github.com/fabiommendes/chalk/blob/main/docs/user-manual/autograding-scripts.md).

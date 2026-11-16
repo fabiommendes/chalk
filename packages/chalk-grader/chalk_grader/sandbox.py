@@ -11,6 +11,11 @@ the script, and the paths listed in `autograder.mounts`.
 The working directory and the result directory are the only writable places
 besides the tmpfs mounts. The network is off unless `autograder.network` is
 "host".
+
+The sandbox cannot create user namespaces (`--disable-userns`, bubblewrap
+0.8.0 or newer). With one, the code inside could mount a cgroup file system
+of its own, rooted at the cgroup of its run, and change it: write the
+xattrs systemd-oomd reads and writes, or create child cgroups.
 """
 
 from __future__ import annotations
@@ -23,10 +28,17 @@ import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-__all__ = ["HIDDEN", "BwrapUnavailable", "bwrap_command", "check_bwrap"]
+__all__ = ["HIDDEN", "MIN_BWRAP", "UNSHARE", "BwrapUnavailable", "bwrap_command", "check_bwrap"]
 
 #: Directories replaced by empty tmpfs mounts inside the sandbox.
 HIDDEN = ("/home", "/root", "/run", "/tmp", "/var/tmp", "/mnt", "/media")
+
+#: Namespace options of every sandbox: a user namespace, always, in which no
+#: other user namespace can be created.
+UNSHARE = ("--unshare-all", "--unshare-user", "--disable-userns")
+
+#: Oldest bubblewrap with --disable-userns.
+MIN_BWRAP = "0.8.0"
 
 
 class BwrapUnavailable(RuntimeError):
@@ -46,12 +58,19 @@ def check_bwrap() -> str:
         raise BwrapUnavailable(msg)
 
     probe = subprocess.run(
-        [bwrap, "--ro-bind", "/", "/", "--unshare-all", "--", "true"],
+        [bwrap, "--ro-bind", "/", "/", *UNSHARE, "--", "true"],
         capture_output=True,
         text=True,
     )
     if probe.returncode != 0:
-        msg = f"bwrap cannot create a sandbox: {probe.stderr.strip()}"
+        error = probe.stderr.strip()
+        if "--disable-userns" in error or "--unshare-user" in error:
+            msg = (
+                f"bwrap is too old: chalk needs bubblewrap {MIN_BWRAP} or newer, for "
+                f"--disable-userns ({error})"
+            )
+        else:
+            msg = f"bwrap cannot create a sandbox with a user namespace of its own: {error}"
         raise BwrapUnavailable(msg)
     return bwrap
 
@@ -119,7 +138,7 @@ def bwrap_command(
         # /etc/resolv.conf usually links here, and /run is hidden.
         args += ["--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve"]
 
-    args += ["--unshare-all", "--die-with-parent", "--new-session"]
+    args += [*UNSHARE, "--die-with-parent", "--new-session"]
     if network:
         args += ["--share-net"]
     args += ["--chdir", str(workdir.resolve()), "--", "/bin/sh", "-c", command]

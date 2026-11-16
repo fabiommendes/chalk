@@ -51,6 +51,7 @@ class TestCommand:
         tmpfs = {args[i + 1] for i, a in enumerate(args) if a == "--tmpfs"}
         assert {"/home", "/tmp", "/run"} <= tmpfs
         assert "--unshare-all" in args
+        assert args.index("--unshare-user") < args.index("--disable-userns")
         assert "--share-net" not in args
 
     def test_hides_home_outside_hidden_dirs(self, monkeypatch, tmp_path) -> None:
@@ -164,6 +165,11 @@ class TestSandbox:
         monkeypatch.setenv("HOME", str(home))
         check = report(f"test -d {home}/.tool")
         assert grade(tmp_path, check, mounts=["~/.tool"], pass_env=["HOME"]) == 1
+
+    def test_no_user_namespaces(self, tmp_path) -> None:
+        # With one, the code could mount the cgroup of its run and change it.
+        check = "! python3 -c 'import os; os.unshare(os.CLONE_NEWUSER)' 2>/dev/null"
+        assert grade(tmp_path, report(check)) == 1
 
     def test_timeout(self, tmp_path) -> None:
         start = time.time()

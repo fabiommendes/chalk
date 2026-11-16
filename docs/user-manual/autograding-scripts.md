@@ -259,6 +259,8 @@ your files, use the network or change the system:
   `PATH` and the Python that runs chalk are mounted back read only.
 - The working directory and the result file are the only writable places.
 - The network is off.
+- The code cannot create user namespaces, so it cannot remount the file
+  system or the cgroup of its run.
 
 Options:
 
@@ -273,8 +275,9 @@ Use `sandbox: none` only for scripts that read the answer without running
 it (a regex, a string, code parsed without executing). A sandbox breaks a
 script that needs files under hidden directories; list them in `mounts`.
 
-Chalk fails with a message if `bwrap` is missing or the kernel does not
-allow unprivileged user namespaces.
+Chalk fails with a message if `bwrap` is missing, older than 0.8.0 (it
+needs `--disable-userns`), or the kernel does not allow unprivileged user
+namespaces.
 
 The sandbox protects your machine, not the grade: code that runs in the
 same sandbox as the script can still write the result file.
