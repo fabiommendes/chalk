@@ -1,14 +1,15 @@
-# Publish chalk to PyPI. Push a tag like `chalk-v0.1.0`.
+# Publish the chalk CLI to PyPI as `chalk-classroom` (PyPI refuses `chalk` and
+# `chalk-cli`). Push a tag like `chalk-classroom-v0.1.0`.
 #
-# PyPI uses trusted publishing: the "chalk" project must list this
+# PyPI uses trusted publishing: the "chalk-classroom" project must list this
 # repository, this workflow file and the "pypi" environment as a trusted
 # publisher.
-name: Release chalk
+name: Release chalk-classroom
 
 on:
   push:
     tags:
-      - "chalk-v*.*.*"
+      - "chalk-classroom-v*.*.*"
 
 jobs:
   version:
@@ -19,7 +20,7 @@ jobs:
       - name: Check that the tag matches the package version
         run: |
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          if [ "${GITHUB_REF_NAME}" != "chalk-v${version}" ]; then
+          if [ "${GITHUB_REF_NAME}" != "chalk-classroom-v${version}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match version ${version}" >&2
             exit 1
           fi
@@ -38,5 +39,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv build --package chalk --out-dir dist
+      - run: uv build --package chalk-classroom --out-dir dist
       - run: uv publish dist/*

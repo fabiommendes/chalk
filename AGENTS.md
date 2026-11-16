@@ -47,17 +47,20 @@ do motor; `chalk.core.score`, `chalk.core.grader`,
 Cada pacote publica no PyPI por tag, com trusted publishing (ambiente `pypi`),
 e a versão do `pyproject.toml` precisa bater com a tag:
 
-| Pacote         | Tag                  | Workflow                                  |
-| :------------- | :------------------- | :---------------------------------------- |
-| `chalk`        | `chalk-vX.Y.Z`       | `.github/workflows/release-chalk.yml`        |
-| `chalk-grader` | `chalk-grader-vX.Y.Z` | `.github/workflows/release-chalk-grader.yml` |
+| Pacote            | Tag                      | Workflow                                        |
+| :---------------- | :----------------------- | :---------------------------------------------- |
+| `chalk-classroom` | `chalk-classroom-vX.Y.Z` | `.github/workflows/release-chalk-classroom.yml` |
+| `chalk-grader`    | `chalk-grader-vX.Y.Z`    | `.github/workflows/release-chalk-grader.yml`    |
+
+O PyPI recusa os nomes `chalk` e `chalk-cli`, então a CLI é publicada como
+`chalk-classroom`; o módulo e o comando continuam `chalk`.
 
 O workflow roda o CI, faz `uv build --package <pacote>` e `uv publish`. No
 desenvolvimento, `chalk-grader` e `mdq` vêm de `[tool.uv.sources]` (workspace e
 checkout local); o pacote publicado usa os limites inferiores de
 `dependencies` (`chalk-grader>=...`, `mdq>=...`), então suba o limite quando o
-chalk passar a depender de algo novo. O `chalk` exige um `chalk-grader` já
-publicado: publique o motor primeiro.
+chalk passar a depender de algo novo. O `chalk-classroom` exige um
+`chalk-grader` já publicado: publique o motor primeiro.
 
 ## Dependências irmãs
 

@@ -15,7 +15,7 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "chalk",
+    "chalk-classroom",
     "chalk-grader",
 ]
 
@@ -109,7 +109,7 @@ wheels = [
 ]
 
 [[package]]
-name = "chalk"
+name = "chalk-classroom"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

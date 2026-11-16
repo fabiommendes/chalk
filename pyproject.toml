@@ -1,5 +1,5 @@
 [project]
-name = "chalk"
+name = "chalk-classroom"
 version = "0.1.0"
 description = "Command line tool to grade quizzes and keep a roster and grades in plain text files."
 readme = "README.md"
