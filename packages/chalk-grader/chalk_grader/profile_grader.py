@@ -48,6 +48,7 @@ from typing import Any
 
 from . import cgroup, models
 from . import disqualification as dq
+from .cgroup import Events
 from .graded import DEFAULT_TIMEOUT, Graded
 from .profiles import (
     PrepareError,
@@ -64,7 +65,7 @@ from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
 from .scoring import make_scorer
 from .script_grader import ScriptGrader
-from .script_runner import ChalkEnv, Result, Sandbox, ScriptRunner
+from .script_runner import TRUSTED_MEMORY, ChalkEnv, Result, Sandbox, ScriptRunner, run_trusted
 from .services import RUNNERS, Services
 from .suspicious import MAX_MATCHES, scan
 
@@ -409,6 +410,8 @@ class ProfileGrader(ScriptGrader):
                 result_reader=read,
                 timeout=test.timeout or timeout,
                 limits=limits,
+                # The first try may have changed the state of the services.
+                before_retry=services.restart if services is not None else None,
                 **run,
             ).run()
         finally:
@@ -435,7 +438,7 @@ class ProfileGrader(ScriptGrader):
         values: dict[str, str] = {}
         for name, command in self.spec.probe.items():
             command = self._command(command, {**variables, "workdir": str(cwd)})
-            proc = _run(command, cwd=cwd, env=dict(os.environ), timeout=60)
+            proc, _ = _run(command, cwd=cwd, env=dict(os.environ), timeout=60)
             if proc.returncode != 0:
                 raise PrepareError(
                     f"probe {name!r} of the {self.name} profile failed: {command}\n"
@@ -481,12 +484,14 @@ class ProfileGrader(ScriptGrader):
             for command in self.spec.prepare.commands:
                 command = self._command(command, variables)
                 timeout = self.spec.prepare.timeout or DEFAULT_TIMEOUT * 10
-                proc = _run(command, cwd=workdir, env=env, timeout=timeout)
+                proc, events = _run(command, cwd=workdir, env=env, timeout=timeout)
                 if proc.returncode != 0:
                     shutil.rmtree(path, ignore_errors=True)
+                    over = events is not None and events.over_memory
+                    reason = f" (it used more than {TRUSTED_MEMORY // MiB} MiB)" if over else ""
                     raise PrepareError(
-                        f"prepare command of the {self.name} profile failed{self._hint()}: "
-                        f"{command}\n{proc.stdout}{proc.stderr}".rstrip()
+                        f"prepare command of the {self.name} profile failed{reason}"
+                        f"{self._hint()}: {command}\n{proc.stdout}{proc.stderr}".rstrip()
                     )
             (path / ".ready").write_text("")
         log.info(f"Prepared cache {path}")
@@ -629,16 +634,12 @@ def seed_workdir(root: Path, seeds: Mapping[str, Path]) -> None:
 
 def _run(
     command: str, *, cwd: Path, env: dict[str, str], timeout: float
-) -> subprocess.CompletedProcess[str]:
+) -> tuple[subprocess.CompletedProcess[str], Events | None]:
+    """
+    Run a trusted command of the profile, in a cgroup of its own when the
+    grader has them (see run_trusted).
+    """
     try:
-        return subprocess.run(
-            command,
-            shell=True,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        return run_trusted(command, cwd=cwd, env=env, timeout=timeout)
     except subprocess.TimeoutExpired as e:
         raise PrepareError(f"{command} timed out") from e

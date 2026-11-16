@@ -12,6 +12,10 @@ The services start before the test step of each run, so every student finds
 them in the same state, and stop after it. A service may write a JUnit
 report to $CHALK_RESULT when it gets SIGTERM, with tests about what it
 received; those tests count in the grade.
+
+When the grader has cgroups, each service runs in a cgroup of its own,
+limited as the trusted commands are (TRUSTED_MEMORY, TRUSTED_PROCESSES),
+and whatever is left of it is killed when it stops.
 """
 
 from __future__ import annotations
@@ -28,11 +32,19 @@ from collections.abc import Callable, Iterable, Mapping
 from logging import getLogger
 from pathlib import Path
 
-from . import models
+from . import cgroup, models
+from .cgroup import Cgroup
 from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
 from .sandbox import bwrap_command
-from .script_runner import PASS_ENV
+from .script_runner import (
+    PASS_ENV,
+    TRUSTED_MEMORY,
+    TRUSTED_PROCESSES,
+    RunError,
+    launch_args,
+    read_failure,
+)
 
 __all__ = ["Services"]
 
@@ -80,12 +92,18 @@ class Services:
         self.sockets = self.root / "sockets"
         self.sockets.mkdir()
         self._procs: dict[str, subprocess.Popen[bytes]] = {}
+        self._cgroups: dict[str, Cgroup] = {}
+        #: Where the launcher of each service says why it did not start.
+        self._failures: dict[str, str] = {}
         self._reports: list[str] | None = None
 
     def start(self) -> str | None:
         """
         Start every service and wait until they accept connections. Return
         None, or the reason a service did not start.
+
+        Raises:
+            RunError: the launcher could not start a service in its cgroup.
         """
         for name, spec in self.specs.items():
             self._procs[name] = self._spawn(name, spec)
@@ -95,6 +113,8 @@ class Services:
             deadline = time.monotonic() + spec.start_timeout
             while not self.socket(name).exists():
                 if proc.poll() is not None:
+                    if (reason := read_failure(self._failures[name])) is not None:
+                        raise RunError(f"cannot start the service {name}: {reason}")
                     return self._failure(name, f"exited with code {proc.returncode}")
                 if time.monotonic() > deadline:
                     return self._failure(
@@ -141,14 +161,52 @@ class Services:
                 reports.append(report.read_text(errors="replace"))
             if repo is not None and (output := self._log(name)).exists():
                 shutil.copyfile(output, repo.root / f"chalk.service.{name}")
+        self._close()
         shutil.rmtree(self.root, ignore_errors=True)
         self._reports = reports
         return reports
 
+    def restart(self) -> None:
+        """
+        Kill the services and start them again, in the state they started
+        in, such as before a run tries again (see ScriptRunner). The paths of
+        their sockets stay the same.
+
+        Raises:
+            RunError: a service did not start again.
+        """
+        if self._reports is not None:
+            raise RuntimeError("the services were stopped")
+        for proc in self._procs.values():
+            _kill(proc)
+            proc.wait()
+        self._close()
+        self._procs = {}
+        for name in self.specs:
+            shutil.rmtree(self.root / name, ignore_errors=True)
+            self.socket(name).unlink(missing_ok=True)
+        if (error := self.start()) is not None:
+            raise RunError(f"the services did not start again: {error}")
+
     def __del__(self) -> None:
         for proc in getattr(self, "_procs", {}).values():
             _kill(proc)
+        self._close()
         shutil.rmtree(getattr(self, "root", ""), ignore_errors=True)
+
+    def _close(self) -> None:
+        """
+        Kill what is left of each service and remove its cgroup and the
+        file of its launcher.
+        """
+        for name, group in getattr(self, "_cgroups", {}).items():
+            if group.events().over_memory:
+                log.warning(f"Service {name} used more than {TRUSTED_MEMORY // 2**20} MiB")
+            group.close()
+        for path in getattr(self, "_failures", {}).values():
+            Path(path).unlink(missing_ok=True)
+        self._cgroups = {}
+        self._failures = {}
 
     def _spawn(self, name: str, spec: models.Service) -> subprocess.Popen[bytes]:
         base = self.root / name
@@ -181,6 +239,15 @@ class Services:
             readable=self._readable,
             env=env,
         )
+        cgroups = cgroup.controller()
+        group = None
+        if cgroups is not None:
+            group = cgroups.create(memory=TRUSTED_MEMORY, processes=TRUSTED_PROCESSES)
+            self._cgroups[name] = group
+        handle, self._failures[name] = tempfile.mkstemp(prefix="chalk-launch-")
+        os.close(handle)
+        if group is not None:
+            args = launch_args(group, self._failures[name], args)
         with self._log(name).open("wb") as output:
             return subprocess.Popen(
                 args,

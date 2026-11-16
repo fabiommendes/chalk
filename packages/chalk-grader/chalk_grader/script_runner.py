@@ -28,11 +28,16 @@ from .score import Score
 __all__ = [
     "DEFAULT_PROCESSES",
     "LAUNCHER",
+    "TRUSTED_MEMORY",
+    "TRUSTED_PROCESSES",
     "ChalkEnv",
     "Result",
     "RunError",
     "RunKilled",
     "ScriptRunner",
+    "launch_args",
+    "read_failure",
+    "run_trusted",
 ]
 log = getLogger(__name__)
 
@@ -58,6 +63,19 @@ PASS_ENV = (
 #: not say (pids.max of its cgroup).
 DEFAULT_PROCESSES = 256
 
+#: Memory of the cgroup of a trusted command: a prepare command or probe, or
+#: a service of a profile. These come from the profile, not the student, and
+#: may need more than the memory of a run, such as `cargo build` on every
+#: core or `npm install`. The limit only keeps a broken one from taking the
+#: machine. Measured in prepare: 658 MiB for elm-test make (more than the
+#: 512 MiB of an Elm run), 382 MiB for uv sync with pandas, 111 MiB for
+#: cargo build of a small crate on 16 cores, which grows with the crate and
+#: the cores.
+TRUSTED_MEMORY = 4 * 2**30
+#: Processes and threads of a trusted command: cargo and its rustc's on
+#: every core take a few hundred.
+TRUSTED_PROCESSES = 1024
+
 #: Shell script that starts every run: it joins the cgroup of the run ($1),
 #: applies the address space ($2, KiB) and file size ($3, 512-byte blocks)
 #: limits and executes the rest of its arguments. It replaces preexec_fn,
@@ -73,6 +91,7 @@ if [ -n "$3" ]; then ulimit -f "$3" 2>/dev/null || fail "cannot apply ulimit -f 
 shift 4
 exec "$@"
 """
+
 
 ANSI_REGEX = re.compile(r"(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
 
@@ -134,8 +153,12 @@ class ScriptRunner:
         sandbox: Sandbox | None = None,
         log_name: str = "chalk.stdout",
         expect_result: bool = True,
+        before_retry: Callable[[], None] | None = None,
     ) -> None:
         self._chalk_env = env
+        #: Called before a run that the system killed runs once more, such
+        #: as to start the services of the run again.
+        self._before_retry = before_retry
         self._log_name = log_name
         #: False for steps that only report by the exit code, such as a build.
         self._expect_result = expect_result
@@ -250,13 +273,7 @@ class ScriptRunner:
         """
         Why the launcher could not start the run, read once the run ended.
         """
-        path = Path(self._failure_path)
-        try:
-            data = path.read_bytes()[:4096]
-        except OSError:
-            data = b""
-        path.unlink(missing_ok=True)
-        return data.decode(errors="replace").strip() or None
+        return read_failure(self._failure_path)
 
     def __del__(self) -> None:
         if (failure := getattr(self, "_failure_path", None)) is not None:
@@ -303,6 +320,8 @@ class ScriptRunner:
             return self._run()
         except RunKilled as e:
             log.warning(f"{e}; trying once more")
+        if self._before_retry is not None:
+            self._before_retry()
         self._launch()
         try:
             return self._run()
@@ -529,6 +548,97 @@ class ChalkEnv:
             if var in os.environ:
                 base[var] = os.environ[var]
         return base
+
+
+def launch_args(group: Cgroup | None, failure: str, args: list[str]) -> list[str]:
+    """
+    The arguments that start args through LAUNCHER, in the cgroup given
+    (if any), with no ulimit, reporting a failure of the launcher to the
+    file failure.
+    """
+    path = "" if group is None else str(group.path)
+    return ["/bin/sh", "-c", LAUNCHER, "chalk-run", path, "", "", failure, *args]
+
+
+def read_failure(path: str) -> str | None:
+    """
+    Why the launcher could not start a run, read from its failure file,
+    which is removed.
+    """
+    try:
+        data = Path(path).read_bytes()[:4096]
+    except OSError:
+        data = b""
+    Path(path).unlink(missing_ok=True)
+    return data.decode(errors="replace").strip() or None
+
+
+def run_trusted(
+    command: str, *, cwd: Path, env: dict[str, str], timeout: float
+) -> tuple[subprocess.CompletedProcess[str], Events | None]:
+    """
+    Run a trusted shell command, such as a prepare command of a profile, and
+    return its outcome and the events of its cgroup.
+
+    With cgroups, the command runs in a cgroup of its own, limited by
+    TRUSTED_MEMORY and TRUSTED_PROCESSES, and whatever it leaves behind is
+    killed when it ends. Without them, it runs as a plain subprocess. On a
+    timeout, its process group (and cgroup) is killed.
+
+    Raises:
+        subprocess.TimeoutExpired: the command took longer than timeout.
+        RunError: the launcher could not start the command.
+    """
+    cgroups = cgroup.controller()
+    group = None
+    if cgroups is not None:
+        group = cgroups.create(memory=TRUSTED_MEMORY, processes=TRUSTED_PROCESSES)
+    handle, failure = tempfile.mkstemp(prefix="chalk-launch-")
+    os.close(handle)
+    events = None
+    try:
+        args = ["/bin/sh", "-c", command]
+        process = subprocess.Popen(
+            args if group is None else launch_args(group, failure, args),
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            # Own process group, so a timeout kills the whole tree.
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_tree(process, group)
+            process.communicate()
+            raise
+        finally:
+            # Such as Ctrl-C while it runs.
+            if process.poll() is None:
+                _kill_tree(process, group)
+                process.wait()
+    finally:
+        if group is not None:
+            events = group.events()
+            group.close()
+            if events.peak is not None:
+                log.debug(f"{command}: peak memory {events.peak // 2**20} MiB")
+        reason = read_failure(failure)
+    if reason is not None:
+        raise RunError(f"cannot start {command}: {reason}")
+    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr), events
+
+
+def _kill_tree(process: subprocess.Popen[Any], group: Cgroup | None) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    if group is not None:
+        group.kill()
 
 
 def memory_feedback(events: Events) -> str:

@@ -23,7 +23,7 @@ from test_script_limits import script_grader
 from chalk_grader import cgroup
 from chalk_grader import disqualification as dq
 from chalk_grader.cgroup import Cgroup, Events
-from chalk_grader.profiles import ReferenceMemoryLimit
+from chalk_grader.profiles import PrepareError, ReferenceMemoryLimit
 from chalk_grader.script_runner import LAUNCHER, RunError, RunKilled, memory_feedback
 
 needs_cgroup = pytest.mark.skipif(
@@ -42,6 +42,9 @@ MiB = 2**20
 
 
 PASS = 'echo 1 > "$CHALK_RESULT"\n'
+
+#: A JUnit report with one test that passes, for the profiles.
+JUNIT = """echo '<testsuite><testcase classname="t" name="ok"/></testsuite>' > "$CHALK_RESULT\""""
 
 
 class TestEvents:
@@ -262,3 +265,47 @@ def test_reference_over_its_memory(tmp_path) -> None:
     grader = make_grader(template, solution, {"shell-tests": profile}, sandbox="none")
     with pytest.raises(ReferenceMemoryLimit, match="more than 100 MiB"):
         grader.prepare()
+
+
+@needs_cgroup
+class TestPrepareCgroup:
+    """The prepare commands run in cgroups of their own."""
+
+    def grader(self, tmp_path, command: str, timeout: float | None = None):
+        template = tmp_path / "q" / "template"
+        template.mkdir(parents=True)
+        solution = tmp_path / "solution"
+        solution.mkdir()
+        profile = {
+            "prepare": {"commands": [command], "timeout": timeout},
+            "test": {"command": JUNIT},
+        }
+        return make_grader(template, solution, {"shell-tests": profile}, sandbox="none")
+
+    def wait_gone(self, pid: int) -> bool:
+        deadline = time.monotonic() + 5
+        while Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return not Path(f"/proc/{pid}").exists()
+
+    def test_in_a_run_cgroup(self, tmp_path) -> None:
+        out = tmp_path / "cgroup"
+        self.grader(tmp_path, f"cat /proc/self/cgroup > {out}").prepare()
+        assert "/run-" in out.read_text()
+
+    def test_leaves_nothing_behind(self, tmp_path) -> None:
+        pidfile = tmp_path / "pid"
+        command = f"setsid sleep 60 > /dev/null 2>&1 & echo $! > {pidfile}"
+        self.grader(tmp_path, command).prepare()
+        assert self.wait_gone(int(pidfile.read_text()))
+        own = cgroup.current()
+        assert own is not None and not list(own.parent.glob("run-*"))
+
+    def test_timeout_kills_the_tree(self, tmp_path) -> None:
+        pidfile = tmp_path / "pid"
+        command = f"setsid sleep 60 > /dev/null 2>&1 & echo $! > {pidfile}; sleep 60"
+        start = time.monotonic()
+        with pytest.raises(PrepareError, match="timed out"):
+            self.grader(tmp_path, command, timeout=1).prepare()
+        assert time.monotonic() - start < 10
+        assert self.wait_gone(int(pidfile.read_text()))

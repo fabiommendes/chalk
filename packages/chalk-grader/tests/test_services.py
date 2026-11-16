@@ -16,9 +16,11 @@ from pathlib import Path
 import pytest
 from test_sandbox import needs_bwrap
 
-from chalk_grader import models
+from chalk_grader import cgroup, models
+from chalk_grader.cgroup import Events
 from chalk_grader.profile_grader import ProfileGrader, resolve_profile
 from chalk_grader.profiles import PrepareError, score_report
+from chalk_grader.script_runner import TRUSTED_MEMORY, TRUSTED_PROCESSES
 from chalk_grader.services import RUNNERS
 from chalk_grader.task import Task
 
@@ -176,6 +178,19 @@ class TestServices:
         assert time.time() - start < 15
 
 
+@needs_bwrap
+def test_services_start_again_with_the_run(tmp_path: Path, fake_cgroups) -> None:
+    # Without a cgroup, the memory would be the address space.
+    fake = fake_cgroups(Events(), Events(), Events(), Events(oom_kill=1))
+    grader = make_grader(tmp_path, limits={"memory": "100MiB"})
+    # The service and the run of the reference, then those of the answer,
+    # which the system kills; then both again.
+    graded = grader("s1", project(tmp_path / "s1", CLIENT))
+    assert graded.score == 1, graded.feedback
+    service, run = (TRUSTED_MEMORY, TRUSTED_PROCESSES), (100 * 2**20, 256)
+    assert fake.created == [service, run] * 3
+
+
 def test_services_need_the_sandbox(tmp_path: Path) -> None:
     with pytest.raises(PrepareError, match="need the sandbox"):
         make_grader(tmp_path, sandbox="none").prepare()
@@ -250,3 +265,12 @@ def test_net_forwards_to_the_service(tmp_path: Path) -> None:
         assert serve.stdin is not None
         serve.stdin.close()
         serve.wait(10)
+
+
+@needs_bwrap
+@pytest.mark.skipif(cgroup.controller() is None, reason="needs a delegated cgroup")
+def test_services_leave_no_cgroup(tmp_path: Path) -> None:
+    graded = make_grader(tmp_path)("s1", project(tmp_path / "s1", CLIENT))
+    assert graded.score == 1, graded.feedback
+    own = cgroup.current()
+    assert own is not None and not list(own.parent.glob("run-*"))

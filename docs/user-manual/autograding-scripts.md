@@ -199,6 +199,16 @@ The profiles also run one test at a time (`vars.jobs`, default 1), since
 `chalk` and the codehood worker may grade several answers at once. A
 profile of your own reads the limit as `{memory_mib}`, in MiB.
 
+The commands of a profile's `prepare` step, its probes and each of its
+services also run in cgroups of their own, but with generous limits (4 GiB
+of memory, 1024 processes): they come from the profile, not the student,
+and tools such as `elm-test make` (658 MiB measured) or `cargo build` on
+every core can need more than the memory of a run. The limit only keeps a
+broken one from taking the machine. Whatever such a command leaves running
+is killed when it ends or times out, and a service when it stops. When chalk
+runs a test step once more (above), the services start again, so the
+second try finds them as the first did.
+
 The cgroups need a cgroup v2 delegated to chalk. `chalk autograde` and
 `chalk codehood autograde` run themselves again with
 `systemd-run --user --scope -p Delegate=yes`, which any Linux with systemd

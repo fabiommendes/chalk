@@ -22,6 +22,7 @@ from chalk_grader.profile_grader import (
     seed_workdir,
 )
 from chalk_grader.profiles import PrepareError, ReferenceMemoryLimit
+from chalk_grader.script_runner import TRUSTED_MEMORY, TRUSTED_PROCESSES
 from chalk_grader.task import Task
 
 RUNNER = """\
@@ -190,6 +191,20 @@ class TestWithoutSandbox(Cases):
         profiles = {"shell-tests": {**SHELL["shell-tests"], "test": {"command": "true"}}}
         with pytest.raises(PrepareError, match="no tests"):
             make_grader(template, solution, profiles, sandbox="none").prepare()
+
+    def test_prepare_commands_have_cgroups(self, template, solution, fake_cgroups) -> None:
+        fake = fake_cgroups()
+        make_grader(template, solution, sandbox="none").prepare()
+        trusted = (TRUSTED_MEMORY, TRUSTED_PROCESSES)
+        # The probe, the prepare command, then the build and the test of the
+        # reference.
+        assert fake.created == [trusted, trusted, (None, 256), (None, 256)]
+
+    def test_prepare_over_its_memory(self, template, solution, fake_cgroups) -> None:
+        profile = {**SHELL["shell-tests"], "probe": {}, "prepare": {"commands": ["exit 9"]}}
+        fake_cgroups(Events(oom=1, oom_kill=1))
+        with pytest.raises(PrepareError, match=r"failed \(it used more than 4096 MiB\)"):
+            make_grader(template, solution, {"shell-tests": profile}, sandbox="none").prepare()
 
     def test_reference_over_its_memory(self, template, solution, fake_cgroups) -> None:
         # The only run is the test step of the reference.
