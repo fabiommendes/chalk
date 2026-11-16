@@ -20,6 +20,7 @@ from .scoring import Scorer, ScoringError
 
 __all__ = [
     "PrepareError",
+    "ReferenceMemoryLimit",
     "check_relative",
     "install_trusted_files",
     "read_report",
@@ -43,6 +44,23 @@ class PrepareError(RuntimeError):
     The template cannot be prepared: missing lock file, failed probe or
     dependency install, or a reference run without tests.
     """
+
+
+class ReferenceMemoryLimit(PrepareError):
+    """
+    The reference solution went past the memory of its run while its tests
+    were collected. The question needs more memory: an error of the
+    question, not of the machine, so trying again does not help.
+    """
+
+    def __init__(self, profile: str, memory: int | None) -> None:
+        #: memory.max of the run, in bytes, or None when it had none.
+        self.memory = memory
+        used = "too much memory" if memory is None else f"more than {memory // 2**20} MiB"
+        super().__init__(
+            f"the reference run of the {profile} profile used {used}; give it more with "
+            "vars.memory_mib or limits.memory"
+        )
 
 
 def check_relative(name: str) -> None:

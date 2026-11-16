@@ -88,6 +88,8 @@ class Result:
     notes: str | None = None
     #: Outcome of each expected test, when the result came from a test report.
     cases: tuple[CaseResult, ...] | None = None
+    #: memory.max of the run, in bytes, when it went past it (MemoryLimit).
+    memory_limit: int | None = None
 
     def __bool__(self) -> bool:
         return self.return_code == 0
@@ -331,6 +333,7 @@ class ScriptRunner:
                 score=dq.MemoryLimit(),
                 feedback=memory_feedback(events),
                 stdout=stdout,
+                memory_limit=events.limit,
             )
         if events is not None and events.killed_from_outside:
             shutil.rmtree(self._result_dir, ignore_errors=True)

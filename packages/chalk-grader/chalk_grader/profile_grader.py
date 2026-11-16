@@ -51,6 +51,7 @@ from . import disqualification as dq
 from .graded import DEFAULT_TIMEOUT, Graded
 from .profiles import (
     PrepareError,
+    ReferenceMemoryLimit,
     TestKey,
     check_relative,
     install_trusted_files,
@@ -528,6 +529,9 @@ class ProfileGrader(ScriptGrader):
             capture_output=True,
             sandbox=self._sandbox(),
         )
+        if result.score == dq.MemoryLimit():
+            # Its report, if any, was not read: no tests either.
+            raise ReferenceMemoryLimit(self.name, result.memory_limit)
         if not keys:
             details = result.feedback or result.stdout or ""
             raise PrepareError(

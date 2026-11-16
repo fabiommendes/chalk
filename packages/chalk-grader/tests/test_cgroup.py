@@ -17,11 +17,13 @@ from pathlib import Path
 
 import pytest
 from conftest import FakeController
+from test_data_profiles import make_grader
 from test_script_limits import script_grader
 
 from chalk_grader import cgroup
 from chalk_grader import disqualification as dq
 from chalk_grader.cgroup import Cgroup, Events
+from chalk_grader.profiles import ReferenceMemoryLimit
 from chalk_grader.script_runner import LAUNCHER, RunError, RunKilled, memory_feedback
 
 needs_cgroup = pytest.mark.skipif(
@@ -248,3 +250,15 @@ class TestRunCgroup:
         assert run.path.is_dir()
         found.kill_all()
         assert not run.path.exists()
+
+
+@needs_cgroup
+def test_reference_over_its_memory(tmp_path) -> None:
+    template = tmp_path / "q" / "template"
+    template.mkdir(parents=True)
+    solution = tmp_path / "solution"
+    solution.mkdir()
+    profile = {"test": {"command": GREEDY}, "vars": {"memory_mib": "100"}}
+    grader = make_grader(template, solution, {"shell-tests": profile}, sandbox="none")
+    with pytest.raises(ReferenceMemoryLimit, match="more than 100 MiB"):
+        grader.prepare()

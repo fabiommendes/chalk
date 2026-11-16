@@ -13,6 +13,7 @@ from test_sandbox import needs_bwrap
 
 from chalk_grader import disqualification as dq
 from chalk_grader import models
+from chalk_grader.cgroup import Events
 from chalk_grader.profile_grader import (
     ProfileGrader,
     builtin_profiles,
@@ -20,7 +21,7 @@ from chalk_grader.profile_grader import (
     resolve_profile,
     seed_workdir,
 )
-from chalk_grader.profiles import PrepareError
+from chalk_grader.profiles import PrepareError, ReferenceMemoryLimit
 from chalk_grader.task import Task
 
 RUNNER = """\
@@ -189,6 +190,22 @@ class TestWithoutSandbox(Cases):
         profiles = {"shell-tests": {**SHELL["shell-tests"], "test": {"command": "true"}}}
         with pytest.raises(PrepareError, match="no tests"):
             make_grader(template, solution, profiles, sandbox="none").prepare()
+
+    def test_reference_over_its_memory(self, template, solution, fake_cgroups) -> None:
+        # The only run is the test step of the reference.
+        profile = {k: v for k, v in SHELL["shell-tests"].items() if k in ("key", "files", "test")}
+        fake_cgroups(Events(oom=1, oom_kill=1))
+        grader = make_grader(
+            template,
+            solution,
+            {"shell-tests": profile},
+            sandbox="none",
+            limits={"memory": "100MiB"},
+        )
+        with pytest.raises(ReferenceMemoryLimit, match="more than 100 MiB") as error:
+            grader.prepare()
+        assert error.value.memory == 100 * 2**20
+        assert "vars.memory_mib or limits.memory" in str(error.value)
 
 
 @needs_bwrap
