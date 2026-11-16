@@ -20,8 +20,8 @@ from chalk_grader import cgroup, models
 from chalk_grader.cgroup import Events
 from chalk_grader.profile_grader import ProfileGrader, resolve_profile
 from chalk_grader.profiles import PrepareError, score_report
-from chalk_grader.script_runner import TRUSTED_MEMORY, TRUSTED_PROCESSES
-from chalk_grader.services import RUNNERS
+from chalk_grader.script_runner import TRUSTED_MEMORY, TRUSTED_PROCESSES, RunError
+from chalk_grader.services import RUNNERS, Services
 from chalk_grader.task import Task
 
 SERVER = """\
@@ -189,6 +189,48 @@ def test_services_start_again_with_the_run(tmp_path: Path, fake_cgroups) -> None
     assert graded.score == 1, graded.feedback
     service, run = (TRUSTED_MEMORY, TRUSTED_PROCESSES), (100 * 2**20, 256)
     assert fake.created == [service, run] * 3
+
+
+@needs_bwrap
+def test_service_killed_by_the_system_runs_again(tmp_path: Path, fake_cgroups) -> None:
+    # The service and the run of the reference, then those of the answer,
+    # with the service killed by systemd-oomd; then both again.
+    fake = fake_cgroups(Events(), Events(), Events(oomd=1), Events())
+    graded = make_grader(tmp_path, limits={"memory": "100MiB"})(
+        "s1", project(tmp_path / "s1", CLIENT)
+    )
+    assert graded.score == 1, graded.feedback
+    service, run = (TRUSTED_MEMORY, TRUSTED_PROCESSES), (100 * 2**20, 256)
+    assert fake.created == [service, run] * 3
+
+
+@needs_bwrap
+def test_service_over_its_memory_is_not_graded(tmp_path: Path, fake_cgroups) -> None:
+    # Not the answer's fault without evidence.
+    fake_cgroups(Events(), Events(), Events(oom=1, oom_kill=1))
+    grader = make_grader(tmp_path, limits={"memory": "100MiB"})
+    with pytest.raises(RunError, match="service api used more than 4096 MiB"):
+        grader("s1", project(tmp_path / "s1", CLIENT))
+
+
+@needs_bwrap
+def test_services_that_fail_to_start_are_cleaned_up(
+    tmp_path: Path, fake_cgroups, monkeypatch
+) -> None:
+    fake = fake_cgroups()
+    roots: list[Path] = []
+    start = Services.start
+
+    def broken(self: Services) -> str | None:
+        roots.append(self.root)
+        start(self)
+        raise RunError("cannot start the service api: test")
+
+    monkeypatch.setattr(Services, "start", broken)
+    with pytest.raises(RunError, match="cannot start the service api"):
+        make_grader(tmp_path).prepare()
+    assert roots and not roots[0].exists()
+    assert not list(fake.root.glob("run-*"))
 
 
 def test_services_need_the_sandbox(tmp_path: Path) -> None:

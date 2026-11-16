@@ -109,6 +109,9 @@ class Result:
     cases: tuple[CaseResult, ...] | None = None
     #: memory.max of the run, in bytes, when it went past it (MemoryLimit).
     memory_limit: int | None = None
+    #: Step of a profile the result comes from, when it is not the test
+    #: step, such as "build".
+    step: str | None = None
 
     def __bool__(self) -> bool:
         return self.return_code == 0
@@ -154,11 +157,16 @@ class ScriptRunner:
         log_name: str = "chalk.stdout",
         expect_result: bool = True,
         before_retry: Callable[[], None] | None = None,
+        after_run: Callable[[], None] | None = None,
     ) -> None:
         self._chalk_env = env
         #: Called before a run that the system killed runs once more, such
         #: as to start the services of the run again.
         self._before_retry = before_retry
+        #: Called when a run ends, if its own cgroup says nothing against it,
+        #: before its result is read. It may raise RunKilled, such as when the
+        #: system killed a service of the run, and the run is tried again.
+        self._after_run = after_run
         self._log_name = log_name
         #: False for steps that only report by the exit code, such as a build.
         self._expect_result = expect_result
@@ -359,6 +367,12 @@ class ScriptRunner:
         if events is not None and events.killed_from_outside:
             shutil.rmtree(self._result_dir, ignore_errors=True)
             raise RunKilled(f"the system killed a process of the run of {student}")
+        if self._after_run is not None:
+            try:
+                self._after_run()
+            except RunError:
+                shutil.rmtree(self._result_dir, ignore_errors=True)
+                raise
 
         # The script may hang (timeout=True), and even so it may generate a valid report file.
         # We test this here and only create a timeout score if the report file is not generated.
@@ -584,8 +598,14 @@ def run_trusted(
 
     With cgroups, the command runs in a cgroup of its own, limited by
     TRUSTED_MEMORY and TRUSTED_PROCESSES, and whatever it leaves behind is
-    killed when it ends. Without them, it runs as a plain subprocess. On a
-    timeout, its process group (and cgroup) is killed.
+    killed when it ends or times out. It shares the terminal, stdin and
+    process group of the grader, so that a command that asks for a password
+    (git and ssh open /dev/tty) can. Without cgroups, it runs in a session
+    of its own, so that a timeout kills its process group: stdin is still
+    the grader's, but /dev/tty cannot be opened there (ENXIO), and such a
+    prompt fails at once. A process group of its own in the same session
+    would not help: it would be in the background of the terminal and stop
+    at the prompt (SIGTTIN) until the timeout.
 
     Raises:
         subprocess.TimeoutExpired: the command took longer than timeout.
@@ -604,12 +624,12 @@ def run_trusted(
             args if group is None else launch_args(group, failure, args),
             cwd=cwd,
             env=env,
-            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            # Own process group, so a timeout kills the whole tree.
-            start_new_session=True,
+            # Without a cgroup to kill, its own process group, so a timeout
+            # kills the whole tree.
+            start_new_session=group is None,
         )
         try:
             stdout, stderr = process.communicate(timeout=timeout)
@@ -635,17 +655,25 @@ def run_trusted(
 
 
 def _kill_tree(process: subprocess.Popen[Any], group: Cgroup | None) -> None:
+    """
+    Kill a trusted command and its children: its cgroup, or else its
+    process group (see run_trusted).
+    """
+    if group is not None:
+        group.kill()
+        return
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
-    if group is not None:
-        group.kill()
 
 
 def memory_feedback(events: Events) -> str:
     if events.limit is None:
         return "The answer used too much memory."
+    if events.oom == 0:
+        # Killed by systemd-oomd near its limit (see Events.over_memory).
+        return f"The answer used nearly all of its {events.limit // 2**20} MiB of memory."
     return f"The answer used more than {events.limit // 2**20} MiB of memory."
 
 

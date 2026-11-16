@@ -15,7 +15,12 @@ received; those tests count in the grade.
 
 When the grader has cgroups, each service runs in a cgroup of its own,
 limited as the trusted commands are (TRUSTED_MEMORY, TRUSTED_PROCESSES),
-and whatever is left of it is killed when it stops.
+and whatever is left of it is killed when it stops. A service the system
+killed (the OOM killer or systemd-oomd) makes the run RunKilled, which runs
+again with the services started again; one that went past its own limit
+makes it RunError. Either way the answer is not graded with the tests of a
+dead service: the teacher's service is not the answer's fault without
+evidence.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from logging import getLogger
 from pathlib import Path
 
 from . import cgroup, models
-from .cgroup import Cgroup
+from .cgroup import Cgroup, Events
 from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
 from .sandbox import bwrap_command
@@ -42,6 +47,7 @@ from .script_runner import (
     TRUSTED_MEMORY,
     TRUSTED_PROCESSES,
     RunError,
+    RunKilled,
     launch_args,
     read_failure,
 )
@@ -135,12 +141,18 @@ class Services:
         args = [sys.executable, "-I", str(RUNNERS / "net.py"), "forward", *maps]
         return f"{shlex.join(args)} -- /bin/sh -c {shlex.quote(command)}"
 
-    def stop(self, repo: Repo | None = None) -> list[str]:
+    def stop(self, repo: Repo | None = None, *, check: bool = True) -> list[str]:
         """
         Stop the services and return their reports. The output of each
         service goes to the file chalk.service.<name> of the repository.
 
-        Only the first call stops them; the others return the same reports.
+        Only the first call that returns stops them; the others return the
+        same reports.
+
+        Raises (only with check):
+            RunKilled: the system killed a service, for the memory of the
+                machine. The services can start again with restart().
+            RunError: a service went past its memory limit.
         """
         if self._reports is not None:
             return self._reports
@@ -161,9 +173,18 @@ class Services:
                 reports.append(report.read_text(errors="replace"))
             if repo is not None and (output := self._log(name)).exists():
                 shutil.copyfile(output, repo.root / f"chalk.service.{name}")
-        self._close()
+        events = self._close()
+        killed = [name for name, e in events.items() if e.killed_from_outside]
+        if check and killed:
+            # Kept for restart().
+            raise RunKilled(f"the system killed the service {killed[0]}")
         shutil.rmtree(self.root, ignore_errors=True)
         self._reports = reports
+        over = [name for name, e in events.items() if e.over_memory]
+        if check and over:
+            raise RunError(
+                f"the service {over[0]} used more than {TRUSTED_MEMORY // 2**20} MiB of memory"
+            )
         return reports
 
     def restart(self) -> None:
@@ -180,6 +201,8 @@ class Services:
         for proc in self._procs.values():
             _kill(proc)
             proc.wait()
+            if proc.stdin is not None:
+                proc.stdin.close()
         self._close()
         self._procs = {}
         for name in self.specs:
@@ -194,19 +217,24 @@ class Services:
         self._close()
         shutil.rmtree(getattr(self, "root", ""), ignore_errors=True)
 
-    def _close(self) -> None:
+    def _close(self) -> dict[str, Events]:
         """
         Kill what is left of each service and remove its cgroup and the
-        file of its launcher.
+        file of its launcher. Return the events of each cgroup.
         """
+        found: dict[str, Events] = {}
         for name, group in getattr(self, "_cgroups", {}).items():
-            if group.events().over_memory:
+            found[name] = events = group.events()
+            if events.over_memory:
                 log.warning(f"Service {name} used more than {TRUSTED_MEMORY // 2**20} MiB")
+            elif events.killed_from_outside:
+                log.warning(f"The system killed the service {name}")
             group.close()
         for path in getattr(self, "_failures", {}).values():
             Path(path).unlink(missing_ok=True)
         self._cgroups = {}
         self._failures = {}
+        return found
 
     def _spawn(self, name: str, spec: models.Service) -> subprocess.Popen[bytes]:
         base = self.root / name

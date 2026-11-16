@@ -53,13 +53,20 @@ class ReferenceMemoryLimit(PrepareError):
     question, not of the machine, so trying again does not help.
     """
 
-    def __init__(self, profile: str, memory: int | None) -> None:
-        #: memory.max of the run, in bytes, or None when it had none.
+    def __init__(self, profile: str, memory: int | None, setting: str | None = None) -> None:
+        """
+        Args:
+            profile: name of the profile.
+            memory: memory.max of the run, in bytes, or None when it had none.
+            setting: the setting that gives it more memory, when not
+                vars.memory_mib or limits.memory, such as build.limits.memory
+                for a build with limits of its own.
+        """
         self.memory = memory
         used = "too much memory" if memory is None else f"more than {memory // 2**20} MiB"
         super().__init__(
             f"the reference run of the {profile} profile used {used}; give it more with "
-            "vars.memory_mib or limits.memory"
+            f"{setting or 'vars.memory_mib or limits.memory'}"
         )
 
 

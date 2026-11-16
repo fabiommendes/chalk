@@ -19,7 +19,10 @@ leaf cgroup (or one with memory.oom.group) with the most reclaim: a run,
 or the supervisor. The supervisor gets the user.oomd_avoid xattr, which
 oomd honors on a cgroup of the user whose slice it watches, so a run goes
 first. oomd marks what it kills with user.oomd_ooms, which `Events.oomd`
-reads; a sandboxed run cannot write it, since /sys is read only there.
+reads. A sandboxed run cannot write it, nor change its cgroup in any other
+way: /sys is read only in the sandbox, and the sandbox cannot create the user
+namespace it would need to mount a cgroup file system of its own (see
+sandbox.py). A run without the sandbox (`sandbox: none`) can.
 
 The process of the run joins its cgroup before it executes anything (see
 `LAUNCHER` in script_runner.py). Without a delegated cgroup, `controller()`
@@ -47,6 +50,7 @@ from logging import getLogger
 from pathlib import Path
 
 __all__ = [
+    "OOMD_NEAR_LIMIT",
     "REEXEC_ENV",
     "Cgroup",
     "CgroupController",
@@ -60,6 +64,11 @@ log = getLogger(__name__)
 ROOT = Path("/sys/fs/cgroup")
 SUPERVISOR = "supervisor"
 CONTROLLERS = ("memory", "pids")
+
+#: Fraction of its memory.max from which a run that systemd-oomd killed is
+#: blamed for it: the pressure was likely its own reclaim. Below it, the
+#: pressure came from elsewhere, and the kill is the machine's fault.
+OOMD_NEAR_LIMIT = 0.9
 
 #: Set when the grader runs again under systemd-run, so it does not loop.
 REEXEC_ENV = "CHALK_CGROUP_REEXEC"
@@ -86,25 +95,37 @@ class Events:
     limit: int | None = None
 
     @property
+    def near_limit(self) -> bool:
+        """
+        The run came close to its own memory limit (OOMD_NEAR_LIMIT of it).
+        False without a limit, or when the kernel does not report the peak.
+        """
+        if self.limit is None or self.peak is None:
+            return False
+        return self.peak >= OOMD_NEAR_LIMIT * self.limit
+
+    @property
     def over_memory(self) -> bool:
         """
         The run took too much memory and was killed for it: it went past its
-        own limit, or, without a limit of its own, the system's OOM killer
-        chose it. Without a limit, every OOM is global, and the answer that
-        takes the memory of the machine is the likeliest choice.
+        own limit; or systemd-oomd killed it while it was near its limit,
+        since then its own reclaim is likely the pressure oomd saw; or,
+        without a limit of its own, the system's OOM killer or oomd chose it.
+        Without a limit, every OOM is global, and the answer that takes the
+        memory of the machine is the likeliest choice.
         """
         if self.limit is None:
             return self.oom_kill > 0 or self.oomd > 0
-        return self.oom > 0 and self.oom_kill > 0
+        return (self.oom > 0 and self.oom_kill > 0) or (self.oomd > 0 and self.near_limit)
 
     @property
     def killed_from_outside(self) -> bool:
         """
         A process of the run was killed by the system's OOM killer, while the
-        run was within its own memory limit, or systemd-oomd killed the run
-        for the memory pressure of the machine.
+        run was within its own memory limit, or systemd-oomd killed the run,
+        far from its limit, for the memory pressure of the machine.
         """
-        if self.limit is None:
+        if self.limit is None or self.over_memory:
             return False
         return (self.oom_kill > 0 and self.oom == 0) or self.oomd > 0
 
@@ -147,20 +168,34 @@ class Cgroup:
             pass
 
     def close(self, wait: float = 5.0) -> None:
+        """
+        Kill the run and remove its cgroup, with the child cgroups a run
+        without the sandbox may have created, deepest first.
+        """
         self.kill()
         deadline = time.monotonic() + wait
         while True:
             try:
+                for path in self._descendants():
+                    path.rmdir()
                 self.path.rmdir()
                 return
             except FileNotFoundError:
-                return
+                if not self.path.exists():
+                    return
             except OSError:
                 # EBUSY until the killed processes are gone.
                 if time.monotonic() > deadline:
                     log.warning(f"cannot remove the cgroup {self.path}")
                     return
                 time.sleep(0.01)
+
+    def _descendants(self) -> list[Path]:
+        """The child cgroups, at any depth, deepest first."""
+        found: list[Path] = []
+        for base, dirs, _ in self.path.walk(top_down=False):
+            found.extend(base / d for d in dirs)
+        return found
 
 
 class CgroupController:

@@ -4,6 +4,7 @@ scripts, which runs every step without a language toolchain.
 """
 
 import os
+import resource
 from fractions import Fraction
 from pathlib import Path
 
@@ -17,13 +18,16 @@ from chalk_grader.cgroup import Events
 from chalk_grader.profile_grader import (
     ProfileGrader,
     builtin_profiles,
+    default_test_file_size,
     render,
     resolve_profile,
     seed_workdir,
 )
 from chalk_grader.profiles import PrepareError, ReferenceMemoryLimit
-from chalk_grader.script_runner import TRUSTED_MEMORY, TRUSTED_PROCESSES
+from chalk_grader.script_runner import TRUSTED_MEMORY, TRUSTED_PROCESSES, RunKilled
 from chalk_grader.task import Task
+
+MiB = 2**20
 
 RUNNER = """\
 echo '<testsuites><testsuite>'
@@ -218,6 +222,37 @@ class TestWithoutSandbox(Cases):
         fake_cgroups(Events(oom=1, oom_kill=1))
         with pytest.raises(PrepareError, match=r"failed \(it used more than 4096 MiB\)"):
             make_grader(template, solution, {"shell-tests": profile}, sandbox="none").prepare()
+
+    def test_prepare_killed_by_the_system(self, template, solution, fake_cgroups) -> None:
+        profile = {**SHELL["shell-tests"], "probe": {}, "prepare": {"commands": ["exit 9"]}}
+        fake_cgroups(Events(oom_kill=1))
+        with pytest.raises(PrepareError, match="the system killed the prepare command"):
+            make_grader(template, solution, {"shell-tests": profile}, sandbox="none").prepare()
+
+    def test_reference_over_the_memory_of_its_build(self, template, solution, fake_cgroups) -> None:
+        build = {"command": "true", "limits": {"memory": "50MiB"}}
+        profile = {**SHELL["shell-tests"], "probe": {}, "prepare": {}, "build": build}
+        # The only runs are the build and test steps of the reference.
+        fake_cgroups(Events(oom=1, oom_kill=1))
+        grader = make_grader(template, solution, {"shell-tests": profile}, sandbox="none")
+        with pytest.raises(ReferenceMemoryLimit, match="more than 50 MiB") as error:
+            grader.prepare()
+        assert str(error.value).endswith("give it more with build.limits.memory")
+
+    def test_reference_killed_without_a_limit(self, template, solution, fake_cgroups) -> None:
+        # Without memory.max, a global OOM: maybe the machine's fault.
+        profile = {k: v for k, v in SHELL["shell-tests"].items() if k in ("key", "files", "test")}
+        fake_cgroups(Events(oom_kill=1))
+        grader = make_grader(template, solution, {"shell-tests": profile}, sandbox="none")
+        with pytest.raises(RunKilled, match="killed the reference run"):
+            grader.prepare()
+
+    def test_file_size_under_a_lower_hard_limit(self, monkeypatch) -> None:
+        # The run inherits the lower limit; asking for more would fail.
+        monkeypatch.setattr(resource, "getrlimit", lambda _: (MiB, MiB))
+        assert default_test_file_size() is None
+        monkeypatch.setattr(resource, "getrlimit", lambda _: (-1, resource.RLIM_INFINITY))
+        assert default_test_file_size() == 256 * MiB
 
     def test_reference_over_its_memory(self, template, solution, fake_cgroups) -> None:
         # The only run is the test step of the reference.

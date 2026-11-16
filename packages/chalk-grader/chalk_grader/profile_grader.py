@@ -31,6 +31,7 @@ import fcntl
 import hashlib
 import os
 import re
+import resource
 import shlex
 import shutil
 import subprocess
@@ -67,7 +68,15 @@ from .repo import Repo
 from .result_extractor import MAX_RESULT_SIZE
 from .scoring import make_scorer
 from .script_grader import ScriptGrader
-from .script_runner import TRUSTED_MEMORY, ChalkEnv, Result, Sandbox, ScriptRunner, run_trusted
+from .script_runner import (
+    TRUSTED_MEMORY,
+    ChalkEnv,
+    Result,
+    RunKilled,
+    Sandbox,
+    ScriptRunner,
+    run_trusted,
+)
 from .services import RUNNERS, Services
 from .suspicious import MAX_MATCHES, scan
 
@@ -84,6 +93,19 @@ MiB = 1024 * 1024
 #: not set one, so that an answer cannot fill the disk with one file. Not in
 #: the build or prepare steps: rustc and cc write large binaries there.
 TEST_FILE_SIZE = 256 * MiB
+
+
+def default_test_file_size() -> int | None:
+    """
+    The file size limit of the test step when its limits set none:
+    TEST_FILE_SIZE, or None when the hard limit of this process is lower
+    already. The run inherits that one, and asking for more would fail.
+    """
+    hard = resource.getrlimit(resource.RLIMIT_FSIZE)[1]
+    if hard != resource.RLIM_INFINITY and hard < TEST_FILE_SIZE:
+        return None
+    return TEST_FILE_SIZE
+
 
 #: Profiles implemented in Python, not as data.
 CODE_PROFILES = ("script", "regex")
@@ -370,7 +392,7 @@ class ProfileGrader(ScriptGrader):
             if result.score == dq.Timeout():
                 return replace(result, feedback="The build took too long.")
             if result.score == dq.MemoryLimit():
-                return result
+                return replace(result, step="build")
             if result.return_code != 0:
                 return self._build_error(result)
 
@@ -378,8 +400,8 @@ class ProfileGrader(ScriptGrader):
         limits = test.limits or self.conf.limits
         variables = with_limits(variables, limits)
         test_limits = limits or models.Limits()
-        if test_limits.file_size is None:
-            test_limits = test_limits.model_copy(update={"file_size": ByteSize(TEST_FILE_SIZE)})
+        if test_limits.file_size is None and (file_size := default_test_file_size()) is not None:
+            test_limits = test_limits.model_copy(update={"file_size": ByteSize(file_size)})
         run["default_memory"] = step_memory(variables)
         run["extra_env"] = self._env(variables)
         command = self._command(test.command, variables)
@@ -399,20 +421,20 @@ class ProfileGrader(ScriptGrader):
                     "CHALK_ASSIGNMENT": env.quiz_id,  # deprecated alias of CHALK_QUIZ
                 },
             )
-            if (error := services.start()) is not None:
-                services.stop(repo)
-                return Result(return_code=1, score=dq.Error(), feedback=error)
-            run["sandbox"] = replace(
-                sandbox,
-                readable=(*sandbox.readable, services.sockets, RUNNERS),
-                hidden=(*sandbox.hidden, services.root),
-            )
-            command = services.forward(command)
 
         def read(path: Path) -> Graded:
             return reader(path, services.stop(repo) if services else [])
 
         try:
+            if services is not None:
+                if (error := services.start()) is not None:
+                    return Result(return_code=1, score=dq.Error(), feedback=error)
+                run["sandbox"] = replace(
+                    sandbox,
+                    readable=(*sandbox.readable, services.sockets, RUNNERS),
+                    hidden=(*sandbox.hidden, services.root),
+                )
+                command = services.forward(command)
             return ScriptRunner(
                 None,
                 repo,
@@ -422,11 +444,14 @@ class ProfileGrader(ScriptGrader):
                 limits=test_limits,
                 # The first try may have changed the state of the services.
                 before_retry=services.restart if services is not None else None,
+                # A service the system killed makes the run try again.
+                after_run=(lambda: services.stop(repo)) if services is not None else None,
                 **run,
             ).run()
         finally:
             if services is not None:
-                services.stop(repo)
+                # Already stopped and checked, unless the run ended early.
+                services.stop(repo, check=False)
 
     def _build_error(self, build: Result) -> Result:
         # Lines of the guard are for the teacher and go to the notes.
@@ -497,6 +522,12 @@ class ProfileGrader(ScriptGrader):
                 proc, events = _run(command, cwd=workdir, env=env, timeout=timeout)
                 if proc.returncode != 0:
                     shutil.rmtree(path, ignore_errors=True)
+                    if events is not None and events.killed_from_outside:
+                        raise PrepareError(
+                            f"the system killed the prepare command of the {self.name} "
+                            f"profile: the machine is short of memory: {command}\n"
+                            f"{proc.stdout}{proc.stderr}".rstrip()
+                        )
                     over = events is not None and events.over_memory
                     reason = f" (it used more than {TRUSTED_MEMORY // MiB} MiB)" if over else ""
                     raise PrepareError(
@@ -546,7 +577,22 @@ class ProfileGrader(ScriptGrader):
         )
         if result.score == dq.MemoryLimit():
             # Its report, if any, was not read: no tests either.
-            raise ReferenceMemoryLimit(self.name, result.memory_limit)
+            if result.memory_limit is None:
+                # No memory.max: a global OOM chose it, which may be the
+                # machine's fault, as RunKilled is. Not an error of the
+                # question, which would spend the tries of every job.
+                raise RunKilled(
+                    f"the system killed the reference run of the {self.name} profile: the "
+                    "grading machine may be short of memory, or the reference takes too much "
+                    "(set vars.memory_mib to give it a limit)"
+                )
+            build = self.conf.build.limits
+            if build is None and self.spec.build is not None:
+                build = self.spec.build.limits
+            own = result.step == "build" and build is not None and build.memory is not None
+            raise ReferenceMemoryLimit(
+                self.name, result.memory_limit, setting="build.limits.memory" if own else None
+            )
         if not keys:
             details = result.feedback or result.stdout or ""
             raise PrepareError(

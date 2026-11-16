@@ -68,6 +68,20 @@ class TestEvents:
         # Without a limit of its own, as for any OOM kill.
         assert Events(oomd=1).over_memory
 
+    def test_killed_by_oomd_near_its_limit_is_the_answer(self) -> None:
+        # Its own reclaim was likely the pressure oomd saw.
+        events = Events(oomd=1, peak=95 * MiB, limit=100 * MiB)
+        assert events.over_memory
+        assert not events.killed_from_outside
+        assert memory_feedback(events) == "The answer used nearly all of its 100 MiB of memory."
+
+    def test_killed_by_oomd_far_from_its_limit(self) -> None:
+        events = Events(oomd=1, peak=50 * MiB, limit=100 * MiB)
+        assert events.killed_from_outside
+        assert not events.over_memory
+        # Without memory.peak, the machine gets the doubt.
+        assert Events(oomd=1, limit=100 * MiB).killed_from_outside
+
     def test_quiet_run(self) -> None:
         assert not Events().over_memory
         assert not Events().killed_from_outside
@@ -268,6 +282,26 @@ class TestRunCgroup:
             assert run.events().killed_from_outside
         finally:
             run.close()
+
+    def test_close_removes_child_cgroups(self) -> None:
+        # Made by a run without the sandbox, with a process in the deepest.
+        found = cgroup.controller()
+        assert found is not None
+        run = found.create(memory=None, processes=None)
+        child = run.path / "a" / "b"
+        child.mkdir(parents=True)
+        (run.path / "c").mkdir()
+        join = 'echo $$ > "$0/cgroup.procs" && exec sleep 60'
+        proc = subprocess.Popen(["/bin/sh", "-c", join, str(child)])
+        deadline = time.monotonic() + 5
+        while not (child / "cgroup.procs").read_text().strip():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        start = time.monotonic()
+        run.close()
+        assert time.monotonic() - start < 2
+        assert not run.path.exists()
+        assert proc.wait(5) == -9
 
     def test_kill_all(self, tmp_path) -> None:
         found = cgroup.controller()
