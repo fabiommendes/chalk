@@ -25,6 +25,11 @@ jobs:
           node-version: 22
       - name: Install elm and elm-test
         run: npm install -g elm@0.19.1-5 elm-test@0.19.1-revision17
+      # The runner has cargo; the rust-cargo profile also needs cargo-nextest.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
