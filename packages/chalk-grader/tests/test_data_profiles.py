@@ -192,6 +192,19 @@ class TestWithoutSandbox(Cases):
         with pytest.raises(PrepareError, match="no tests"):
             make_grader(template, solution, profiles, sandbox="none").prepare()
 
+    @pytest.mark.parametrize(
+        ("limits", "blocks"), [(None, 256 * 2048), ({"file_size": "1MiB"}, 2048)]
+    )
+    def test_file_size_of_the_test_step(self, template, solution, limits, blocks) -> None:
+        # Unlimited in the build, where compilers write large files.
+        check = '[ "$(ulimit -f)" = {} ] || exit 1'
+        base = SHELL["shell-tests"]
+        test = {"command": check.format(blocks) + "\n" + base["test"]["command"], "limits": limits}
+        build = {**base["build"], "command": check.format("unlimited")}
+        profile = {**base, "build": build, "test": test}
+        grader = make_grader(template, solution, {"shell-tests": profile}, sandbox="none")
+        assert grader("s1", solution).score == 1
+
     def test_prepare_commands_have_cgroups(self, template, solution, fake_cgroups) -> None:
         fake = fake_cgroups()
         make_grader(template, solution, sandbox="none").prepare()

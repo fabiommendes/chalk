@@ -54,7 +54,12 @@ class Limits(BaseModel):
     ] = None
     file_size: Annotated[
         ByteSize | None,
-        Field(description="Largest file the script or its processes can write (RLIMIT_FSIZE)."),
+        Field(
+            description=(
+                "Largest file the script or its processes can write (RLIMIT_FSIZE). Defaults "
+                "to 256 MiB in the test step of a profile, and to none elsewhere."
+            ),
+        ),
     ] = None
     answer_size: Annotated[
         ByteSize,

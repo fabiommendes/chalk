@@ -166,7 +166,7 @@ questions:
         memory: 1GB        # memory of each run (see below)
         processes: 256     # processes and threads of each run (default 256)
         address_space: 2GB # address space of each process (RLIMIT_AS), rarely needed
-        file_size: 50MB    # largest file a process can write
+        file_size: 50MB    # largest file a process can write (see below)
         answer_size: 1MB   # larger text answers are rejected (default 1 MiB)
 ```
 
@@ -197,6 +197,13 @@ runtime understands, so that a test that takes too much fails on its own:
 | `prolog-plunit` | 512 MiB | stacks of each test, 5/8 of the memory |
 | `c-make` | 1 GiB | none: AddressSanitizer reserves terabytes |
 | `rust-cargo` | 2 GiB | none; the budget includes the build |
+
+The test step of a profile can write no file larger than 256 MiB
+(`RLIMIT_FSIZE`), unless its `file_size` says otherwise: a process that tries
+gets `SIGXFSZ` and dies. The build and prepare steps, where compilers write
+large binaries, and the `script` profile have no such default. The limit is
+per file: it stops an answer that fills the disk with one file, not with
+many. Files in `/tmp` count as memory and are limited by `memory`.
 
 The profiles also run one test at a time (`vars.jobs`, default 1), since
 `chalk` and the codehood worker may grade several answers at once. A

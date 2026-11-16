@@ -46,6 +46,8 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
+from pydantic import ByteSize
+
 from . import cgroup, models
 from . import disqualification as dq
 from .cgroup import Events
@@ -77,6 +79,11 @@ log = getLogger(__name__)
 MAX_BUILD_FEEDBACK = 8000
 
 MiB = 1024 * 1024
+
+#: Largest file the test step may write (RLIMIT_FSIZE), when its limits do
+#: not set one, so that an answer cannot fill the disk with one file. Not in
+#: the build or prepare steps: rustc and cc write large binaries there.
+TEST_FILE_SIZE = 256 * MiB
 
 #: Profiles implemented in Python, not as data.
 CODE_PROFILES = ("script", "regex")
@@ -370,6 +377,9 @@ class ProfileGrader(ScriptGrader):
         test = self.spec.test
         limits = test.limits or self.conf.limits
         variables = with_limits(variables, limits)
+        test_limits = limits or models.Limits()
+        if test_limits.file_size is None:
+            test_limits = test_limits.model_copy(update={"file_size": ByteSize(TEST_FILE_SIZE)})
         run["default_memory"] = step_memory(variables)
         run["extra_env"] = self._env(variables)
         command = self._command(test.command, variables)
@@ -409,7 +419,7 @@ class ProfileGrader(ScriptGrader):
                 command=command,
                 result_reader=read,
                 timeout=test.timeout or timeout,
-                limits=limits,
+                limits=test_limits,
                 # The first try may have changed the state of the services.
                 before_retry=services.restart if services is not None else None,
                 **run,
