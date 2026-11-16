@@ -1,5 +1,5 @@
 # Lint, tests and docs (`uv run task check`) on every push and pull request.
-# The release workflow calls this one before publishing chalk-grader.
+# The release workflow calls this one before publishing chalk or chalk-grader.
 #
 # chalk takes mdq from a sibling checkout (`../../codehood/mdq/mdq-py`, see
 # `[tool.uv.sources]`), so the job clones mdq-spec at that path.

@@ -1,18 +1,28 @@
 [project]
 name = "chalk"
 version = "0.1.0"
-description = "Add your description here"
+description = "Command line tool to grade quizzes and keep a roster and grades in plain text files."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Fábio Macêdo Mendes", email = "fabiomacedomendes@gmail.com" },
 ]
 requires-python = ">=3.13"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Education :: Testing",
+]
 dependencies = [
-    "chalk-grader",
+    "chalk-grader>=0.3.0",
     "errorz>=0.2.1",
     "frozendict>=2.4.7",
     "gitignore-lib>=0.1.1",
-    "mdq>=0.1.0",
+    "mdq>=0.2.0",
     "natsort>=8.4.0",
     "optionz>=0.2.0",
     "pandas>=3.0.3",
@@ -22,6 +32,11 @@ dependencies = [
     "rich>=15.0.0",
     "typer",
 ]
+
+[project.urls]
+Homepage = "https://github.com/fabiommendes/chalk"
+Source = "https://github.com/fabiommendes/chalk"
+Issues = "https://github.com/fabiommendes/chalk/issues"
 
 [project.scripts]
 chalk = "chalk.__main__:main"
@@ -61,6 +76,7 @@ cli-docs = { cmd = "typer chalk.cli utils docs --name chalk --title \"Command re
 [tool.uv.build-backend]
 module-name = "chalk"
 module-root = "."
+source-exclude = [".claude", "packages", "tests", "docs", "dev", "example"]
 
 [tool.ruff]
 line-length = 100

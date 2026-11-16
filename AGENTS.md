@@ -42,10 +42,27 @@ desclassificação e os modelos `Autograder`/`Profile`/`Limits`/`Service` são
 do motor; `chalk.core.score`, `chalk.core.grader`,
 `chalk.core.disqualification` e `chalk.core.models` os reexportam.
 
+## Releases
+
+Cada pacote publica no PyPI por tag, com trusted publishing (ambiente `pypi`),
+e a versão do `pyproject.toml` precisa bater com a tag:
+
+| Pacote         | Tag                  | Workflow                                  |
+| :------------- | :------------------- | :---------------------------------------- |
+| `chalk`        | `chalk-vX.Y.Z`       | `.github/workflows/release-chalk.yml`        |
+| `chalk-grader` | `chalk-grader-vX.Y.Z` | `.github/workflows/release-chalk-grader.yml` |
+
+O workflow roda o CI, faz `uv build --package <pacote>` e `uv publish`. No
+desenvolvimento, `chalk-grader` e `mdq` vêm de `[tool.uv.sources]` (workspace e
+checkout local); o pacote publicado usa os limites inferiores de
+`dependencies` (`chalk-grader>=...`, `mdq>=...`), então suba o limite quando o
+chalk passar a depender de algo novo. O `chalk` exige um `chalk-grader` já
+publicado: publique o motor primeiro.
+
 ## Dependências irmãs
 
 - `mdq` vem do checkout local `../../codehood/mdq/mdq-py` (`[tool.uv.sources]`
-  em `pyproject.toml`). A versão do PyPI está atrás. Não mudamos o mdq por
+  em `pyproject.toml`); no PyPI, `mdq` 0.2.x acompanha a spec. Não mudamos o mdq por
   causa do chalk: o chalk segue as regras dele (por exemplo, `stem`
   obrigatório).
 - `optionz` (`import opt`) e `errorz` vêm do PyPI. `opt.unpack` não existe
