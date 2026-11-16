@@ -283,10 +283,33 @@ em vez de `preexec_fn`, e o comportamento de hoje.
    new thread" (arenas do glibc); o Node abaixo de ~1,4 GiB morre com
    "Failed to reserve virtual memory for CodeRange"; a JVM não inicia com
    512 MiB.
-4. `chalk-worker`: reexecução sob `Delegate=yes`, envio devolvido com
-   `retry` na exceção de infraestrutura, relatório de `MemoryLimit`. O
-   `--memory` do worker passa a ser o `limits.memory` do motor, e a
-   admissão por `MemAvailable` continua.
+4. **Feita (2026-11-16).** `chalk-worker` (commit `c115d39c` do codehood,
+   em `workers/chalk-worker/`), com `chalk-grader>=0.3.0`. Diferenças do
+   desenho:
+   - **`--memory` vai como `vars.memory_mib`, não como `limits.memory`.**
+     Sem cgroup delegado, `limits.memory` vira `RLIMIT_AS` (fase 3b), e o
+     Node não inicia abaixo de ~1,4 GiB de espaço de endereçamento: toda
+     execução Elm falharia. Como variável do perfil, o orçamento é o
+     `memory.max` de cada execução (build e teste) e o heap do Node, e sem
+     cgroup sobra só o heap. Saíram os `profile_overrides` (o paliativo).
+     `--memory 0` deixa o padrão do perfil e desliga a admissão por
+     `MemAvailable`, que continua para os outros valores.
+   - Reexecução sob `Delegate=yes` e `cgroup.controller()` no `main()` do
+     CLI, antes de qualquer thread, exceto em `--help`. O worker diz no
+     início (log ou título da TUI) se as execuções têm limite; sem cgroup,
+     avisa e segue.
+   - `MemoryLimit` no relatório é `resource-limit` em todos os casos, com a
+     mensagem do motor, como o timeout.
+   - **`RunError` (inclusive `RunKilled`) gasta uma tentativa:** o job
+     volta à fila com `retry=True` e sem nota; depois de `RunKilled` o
+     worker espera antes de pedir mais jobs. Não gastar daria tentativas
+     sem fim a uma resposta que derruba a máquina sem bater no próprio
+     limite.
+   - Na referência: `RunError` é falha de preparo (os jobs voltam sem
+     gastar tentativas); `resource-limit` é erro da questão ("give the
+     worker more --memory"), que gasta as tentativas de todos os jobs.
+   - Na saída abrupta (segundo Ctrl+C, abort da TUI, segundo SIGHUP) o
+     worker mata os `run-*` antes do `os._exit`, que pula o `atexit`.
 
 ## Em aberto
 
@@ -294,6 +317,11 @@ em vez de `preexec_fn`, e o comportamento de hoje.
   kernel: não gera `oom_kill` em `memory.events`, então a culpa não é
   atribuída nem há nova tentativa. A execução morta por ele parece um
   `SIGKILL` comum.
+- Uma referência que estoura a memória dentro do `ProfileGrader.prepare()`
+  (descoberta dos testes) sai como `PrepareError` genérico, e o worker a
+  trata como falha de preparo: os jobs voltam à fila sem gastar tentativas,
+  para sempre. O motor deveria distinguir esse caso (por exemplo, um
+  `PrepareError` com `MemoryLimit` como causa).
 - Os comandos de `prepare` e os `services` ainda rodam sem cgroup próprio
   (no `supervisor/`, junto com o grader). Uma nova tentativa depois de
   `RunKilled` reaproveita os serviços já iniciados.
