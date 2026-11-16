@@ -1,6 +1,6 @@
 [project]
 name = "chalk-grader"
-version = "0.3.0"
+version = "0.4.0"
 description = "Grade code answers in a sandbox with data profiles (pytest, cargo, elm-test, plunit...)."
 readme = "README.md"
 license = "MIT"
