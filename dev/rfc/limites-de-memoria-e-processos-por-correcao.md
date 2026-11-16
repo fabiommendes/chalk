@@ -389,7 +389,8 @@ em vez de `preexec_fn`, e o comportamento de hoje.
        com limite próprio morta pelo oomd vira `RunKilled` (roda de novo
        uma vez), em vez de um `SIGKILL` comum. Sem limite próprio, conta
        como `MemoryLimit`, como um OOM global. O código do aluno não forja
-       o xattr: dentro do bwrap, `/sys` é somente leitura (testado: `EROFS`).
+       o xattr pelo `/sys`, que é somente leitura no bwrap (testado:
+       `EROFS`); mas forjava por um user namespace aninhado (ver 5b).
        `memory.high` não foi usado: ele estrangula a execução em vez de
        encerrá-la, o que aumenta a pressão em vez de reduzi-la. O swap não
        preocupa: as execuções têm `memory.swap.max=0`, e o oomd só escolhe
@@ -417,11 +418,92 @@ em vez de `preexec_fn`, e o comportamento de hoje.
      explodir (tabelas enormes, macros recursivas), e aí a culpa é dela.
      Uma questão com build pesada usa `build.limits`.
 
+5b. **Feita (2026-11-16).** Correções depois da revisão de código da
+   fase 5, no `chalk-grader` 0.4.0. Decisões:
+   - **O aluno forjava `user.oomd_ooms`.** O bwrap criava o user namespace
+     do sandbox (`--unshare-all`), mas não impedia outro dentro dele: o
+     código do aluno fazia `unshare -U -r -m -C`, montava um cgroup2 cuja
+     raiz era o próprio `run-*` (do mesmo uid, gravável), gravava o xattr
+     e a execução virava `RunKilled` duas vezes, sem nota (no worker,
+     volta à fila sempre). Podia também gravar `user.oomd_omit`/`avoid` e
+     criar cgroups filhos, que faziam o `rmdir` do `close()` falhar e o
+     `run-*` vazar. Agora o sandbox usa `--unshare-user --disable-userns`
+     (`sandbox.UNSHARE`): o `unshare -U` dentro dele falha com `ENOSPC`
+     (`user.max_user_namespaces` = 1). O `--disable-userns` existe desde o
+     **bubblewrap 0.8.0** (Debian 12, Ubuntu 24.04 e posteriores; o
+     Ubuntu 22.04 traz 0.6.1). Com um bwrap mais antigo, o `check_bwrap`
+     falha com `BwrapUnavailable` ("bwrap is too old: chalk needs
+     bubblewrap 0.8.0 or newer"), em vez de abrir o buraco em silêncio; a
+     saída é atualizar o bwrap ou `sandbox: none`. Sem `--unshare-user-try`,
+     um kernel sem user namespaces sem privilégio também falha com
+     mensagem, como antes. Os perfis embutidos passam com a opção (nenhum
+     runtime deles cria user namespaces). Sem sandbox (`sandbox: none`) o
+     aluno continua podendo forjar: esse modo é só para respostas que não
+     são executadas.
+   - **`Cgroup.close()` remove os descendentes**, do mais fundo para o
+     mais raso, depois do `cgroup.kill` (que já mata a subárvore inteira),
+     e então o `run-*`.
+   - **Serviço morto pelo sistema.** `Services.stop()` lê os eventos do
+     cgroup de cada serviço. Morto de fora (OOM global ou oomd longe do
+     limite) é `RunKilled`, e o `ScriptRunner` chama `stop()` pelo gancho
+     novo `after_run`, depois de checar a própria execução e antes de ler
+     o resultado: entra no retry existente, que reinicia os serviços.
+     Antes, os testes do serviço falhavam e a nota saía errada. Um serviço
+     acima do próprio teto (`over_memory`, 4 GiB) é `RunError` (sem retry,
+     sem nota): o serviço é do professor, e sem evidência a culpa não é
+     da resposta; repetir provavelmente daria o mesmo. O `finally` do
+     passo para os serviços sem checar (`check=False`), para não trocar um
+     resultado já decidido (como o `MemoryLimit` da própria execução) por
+     uma exceção.
+   - **oomd que escolhe a execução que gera a pressão.** O oomd escolhe a
+     folha com mais reclaim, e uma execução apertada no próprio limite
+     reclama muito. Então um kill do oomd só é infraestrutura quando a
+     execução estava longe do limite: `memory.peak` < 90% do `memory.max`
+     (`cgroup.OOMD_NEAR_LIMIT`). Com o pico perto do limite, é
+     `dq.MemoryLimit` ("The answer used nearly all of its N MiB of
+     memory"). Sem `memory.max`, vale o critério da fase 3b para o OOM: a
+     resposta é a suspeita mais provável, e o kill do oomd também é
+     `MemoryLimit`. Sem `memory.peak` (kernel anterior ao 5.19), não há
+     como saber, e fica infraestrutura (`RunKilled`, roda de novo uma vez).
+   - **`services.start()` dentro do `try/finally`**: um `RunError` ou
+     `OSError` no início também para os serviços já iniciados e remove os
+     cgroups e o `chalk-services-*`.
+   - **`prepare` morto pelo sistema** (OOM global ou oomd longe do teto):
+     o `PrepareError` diz "the system killed the prepare command ...: the
+     machine is short of memory", e não "prepare command failed".
+   - **`run_trusted` volta a herdar o stdin.** Verificado: depois de
+     `setsid`, abrir `/dev/tty` dá `ENXIO`, então git e ssh não conseguem
+     pedir senha; e um grupo de processos próprio na mesma sessão abre o
+     `/dev/tty`, mas fica em segundo plano no terminal, e a leitura pararia
+     o comando com `SIGTTIN` até o timeout. Decisão: com cgroup, o comando
+     fica na sessão e no grupo de processos do grader (o prompt funciona,
+     e o Ctrl+C chega a ele); o timeout mata a árvore pelo `cgroup.kill`.
+     Sem cgroup, mantém a sessão própria para o timeout matar a árvore; o
+     stdin é herdado, mas um prompt por `/dev/tty` falha na hora.
+   - **`RLIMIT_FSIZE` padrão** só se o limite *hard* do processo não for
+     menor que 256 MiB; senão o passo herda o *hard* atual (pedir mais
+     faria o `ulimit -f` do lançador falhar e toda execução dar
+     `RunError`).
+   - **`ReferenceMemoryLimit`**: quando o estouro foi no build e o build
+     tem `limits.memory` próprio (`build.limits` da questão ou do perfil),
+     a mensagem manda subir `build.limits.memory`. Sem `memory.max`
+     (perfil sem `vars.memory_mib` nem `limits.memory`), a referência
+     morta por OOM global não é mais erro permanente da questão: é
+     `RunKilled` (a máquina pode estar sem memória), que o worker trata
+     como falha de preparo, sem gastar as tentativas dos jobs. A mensagem
+     sugere `vars.memory_mib` para dar um limite à referência.
+   - `Services.restart()` fecha o stdin dos processos descartados.
+   - `chalk-grader` 0.4.0.
+
 ## Em aberto
 
 - O `systemd-oomd` ainda pode escolher uma execução sob pressão vinda de
-  fora do grader, se ela for a folha com mais reclaim. Agora isso vira
-  `RunKilled` e nova tentativa, mas nenhum kill real do oomd foi observado.
+  fora do grader, se ela for a folha com mais reclaim. Longe do próprio
+  limite, isso vira `RunKilled` e nova tentativa; perto (90%), `MemoryLimit`
+  (fase 5b). Nenhum kill real do oomd foi observado, e o limiar de 90% não
+  foi medido.
+- Ubuntu 22.04 e outras distribuições com bubblewrap anterior ao 0.8.0 não
+  rodam o sandbox (fase 5b) até atualizar o bwrap.
 - O limite de disco é por arquivo. Uma resposta pode encher o disco do
   `--cache-dir` ou do diretório de trabalho com muitos arquivos menores
   (em `/tmp` em tmpfs, eles contam como memória da execução). Uma cota de
