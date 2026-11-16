@@ -177,11 +177,14 @@ reaches `processes` cannot start more, and goes on. Files the run writes to
 `/tmp` count as memory. Nothing a run does reaches the other runs or chalk.
 
 When a process of a run is killed by the system, for the memory of the
-whole machine, while the run was within its own `memory`, the answer is not
-to blame: chalk runs it once more, and if that happens again, leaves it
+whole machine (the kernel's OOM killer, or `systemd-oomd` for the memory
+pressure of the session), while the run was within its own `memory`, the
+answer is not to blame: chalk runs it once more, and if that happens again, leaves it
 ungraded with a message saying so. A run without a `memory` of its own
 (the `script` profile without `limits.memory`) has no such excuse: any
-process of it the system kills for memory gives `memory-limit`.
+process of it the system kills for memory gives `memory-limit`. Chalk asks
+`systemd-oomd` to pick a run before chalk itself (the `user.oomd_avoid`
+attribute of its cgroup).
 
 Profiles have a default `memory`, and some also turn it into a limit their
 runtime understands, so that a test that takes too much fails on its own:

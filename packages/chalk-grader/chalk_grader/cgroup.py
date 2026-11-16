@@ -14,6 +14,13 @@ then gets a `run-*` child of its own:
         run-<id>/       one run: memory.max, memory.swap.max=0, pids.max,
                         memory.oom.group=1
 
+systemd-oomd, when the slice above is under memory pressure, kills the
+leaf cgroup (or one with memory.oom.group) with the most reclaim: a run,
+or the supervisor. The supervisor gets the user.oomd_avoid xattr, which
+oomd honors on a cgroup of the user whose slice it watches, so a run goes
+first. oomd marks what it kills with user.oomd_ooms, which `Events.oomd`
+reads; a sandboxed run cannot write it, since /sys is read only there.
+
 The process of the run joins its cgroup before it executes anything (see
 `LAUNCHER` in script_runner.py). Without a delegated cgroup, `controller()`
 returns None and runs have no memory or process limit besides those of
@@ -71,6 +78,8 @@ class Events:
     oom_kill: int = 0
     #: Times a fork failed because of pids.max.
     pids_max: int = 0
+    #: Times systemd-oomd killed the run, which leaves no OOM event.
+    oomd: int = 0
     #: Largest memory of the run, in bytes, if the kernel reports it.
     peak: int | None = None
     #: memory.max of the run, in bytes, or None when the run has none.
@@ -85,16 +94,19 @@ class Events:
         takes the memory of the machine is the likeliest choice.
         """
         if self.limit is None:
-            return self.oom_kill > 0
+            return self.oom_kill > 0 or self.oomd > 0
         return self.oom > 0 and self.oom_kill > 0
 
     @property
     def killed_from_outside(self) -> bool:
         """
         A process of the run was killed by the system's OOM killer, while the
-        run was within its own memory limit.
+        run was within its own memory limit, or systemd-oomd killed the run
+        for the memory pressure of the machine.
         """
-        return self.limit is not None and self.oom_kill > 0 and self.oom == 0
+        if self.limit is None:
+            return False
+        return (self.oom_kill > 0 and self.oom == 0) or self.oomd > 0
 
 
 @dataclass(frozen=True)
@@ -111,10 +123,15 @@ class Cgroup:
         memory = _keyed(self.path / "memory.events")
         pids = _keyed(self.path / "pids.events")
         peak = _read(self.path / "memory.peak")
+        try:
+            oomd = os.getxattr(self.path, "user.oomd_ooms").decode().strip()
+        except OSError:
+            oomd = ""
         return Events(
             oom=memory.get("oom", 0),
             oom_kill=memory.get("oom_kill", 0),
             pids_max=pids.get("max", 0),
+            oomd=int(oomd) if oomd.isdigit() else 0,
             peak=int(peak) if peak and peak.isdigit() else None,
             limit=self.memory,
         )
@@ -245,6 +262,7 @@ def _setup() -> CgroupController:
         # Set up already, maybe in part, by an earlier controller of this
         # process.
         _enable_controllers(own.parent)
+        _avoid_oomd(own)
         return CgroupController(own.parent)
     if not _is_ours(own):
         raise _NotDelegated(
@@ -279,7 +297,20 @@ def _setup() -> CgroupController:
         except OSError:
             pass
         raise
+    _avoid_oomd(supervisor)
     return CgroupController(own)
+
+
+def _avoid_oomd(path: Path) -> None:
+    """
+    Ask systemd-oomd to kill other cgroups before this one, as
+    ManagedOOMPreference=avoid does for a unit. Without it, the grader
+    may be the cgroup oomd picks under memory pressure.
+    """
+    try:
+        os.setxattr(path, "user.oomd_avoid", b"1")
+    except OSError as e:
+        log.debug(f"cannot set user.oomd_avoid on {path}: {e.strerror}")
 
 
 def _enable_controllers(path: Path) -> None:

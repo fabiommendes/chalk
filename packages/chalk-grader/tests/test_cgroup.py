@@ -62,6 +62,12 @@ class TestEvents:
         assert not events.killed_from_outside
         assert memory_feedback(events) == "The answer used too much memory."
 
+    def test_killed_by_oomd(self) -> None:
+        assert Events(oomd=1, limit=MiB).killed_from_outside
+        assert not Events(oomd=1, limit=MiB).over_memory
+        # Without a limit of its own, as for any OOM kill.
+        assert Events(oomd=1).over_memory
+
     def test_quiet_run(self) -> None:
         assert not Events().over_memory
         assert not Events().killed_from_outside
@@ -245,6 +251,23 @@ class TestRunCgroup:
     def test_memory_is_not_the_address_space(self, tmp_path) -> None:
         body = TestAddressSpace.CHECK.format("unlimited")
         assert script_grader(tmp_path, body, limits={"memory": "1GiB"})("s1", "x").score == 1
+
+    def test_supervisor_avoids_oomd(self) -> None:
+        own = cgroup.current()
+        assert own is not None
+        assert os.getxattr(own, "user.oomd_avoid") == b"1"
+
+    def test_oomd_kill_is_read(self) -> None:
+        found = cgroup.controller()
+        assert found is not None
+        run = found.create(memory=MiB, processes=None)
+        try:
+            # As systemd-oomd marks what it kills.
+            os.setxattr(run.path, "user.oomd_ooms", b"1")
+            assert run.events().oomd == 1
+            assert run.events().killed_from_outside
+        finally:
+            run.close()
 
     def test_kill_all(self, tmp_path) -> None:
         found = cgroup.controller()
